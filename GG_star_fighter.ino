@@ -1,362 +1,246 @@
-#include <Adafruit_GFX.h>
-#include <Adafruit_ST7735.h>
+#include <TFT_eSPI.h>
 #include <SPI.h>
 
-// Настройки дисплея
-#define TFT_CS    5
-#define TFT_RST   4
-#define TFT_DC    21
-#define TFT_SCLK 18
-#define TFT_MOSI 23
+TFT_eSPI tft = TFT_eSPI();
 
-Adafruit_ST7735 tft(TFT_CS, TFT_DC, TFT_MOSI, TFT_SCLK, TFT_RST);
+#define SHIP_SIZE 12
+#define ASTEROID_SIZE 14
+#define BULLET_SIZE 3
+#define GAME_SPEED 5.0
+#define PHYSICS_FPS 40
+#define RENDER_FPS 30
 
-// Пины управления
 #define ENCODER_CLK 14
 #define ENCODER_DT  12
 #define BUTTON_A    15
 #define BUTTON_B    19
 
-// Размеры спрайтов
-#define SHIP_SIZE 16
-#define ASTEROID_SIZE 16
-#define BULLET_SIZE 4
+#define MAX_ASTEROIDS 10
 
-// Игровые константы
-#define GAME_SPEED 5.0
-#define PHYSICS_FPS 40
-#define RENDER_FPS 20
-
-// Состояние игры
-struct {
-  // Игрок
-  float shipX = 64;
-  float shipY = 64;
-  float shipAngle = 0;
-  float shipSpeedX = 0;
-  float shipSpeedY = 0;
-  
-  // Пули
-  struct {
-    float x, y;
-    float dx, dy;
-    bool active;
-    uint32_t spawnTime;
-  } bullets[20];
-  
-  // Астероиды
-  struct {
-    float x, y;
-    float dx, dy;
-    bool active;
-  } asteroids[15];
-  
-  // Игровые параметры
-  int score = 0;
-  int asteroidsCount = 1;
-  uint32_t lastSpawnTime = 0;
-} game;
-
-// Состояние энкодера
 volatile int encoderPos = 0;
 portMUX_TYPE encoderMux = portMUX_INITIALIZER_UNLOCKED;
 
-// Прототипы функций
-void spawnAsteroids();
-void checkCollisions();
-void updatePhysics();
-void handleControls();
-void renderGame();
-void drawToBuffer();
-void drawSpriteToBuffer(int16_t x, int16_t y, const uint16_t sprite[][ASTEROID_SIZE], uint8_t w, uint8_t h);
-void drawRotatedSpriteToBuffer(int16_t x, int16_t y, const uint16_t sprite[][SHIP_SIZE], uint8_t size, float angle);
-void drawCircleToBuffer(int16_t x, int16_t y, int16_t r, uint16_t color);
-void drawTextToBuffer(int16_t x, int16_t y, uint16_t color, const char *text);
-void drawNumberToBuffer(int16_t x, int16_t y, uint16_t color, int number);
+struct Bullet {
+  float x, y, dx, dy;
+  float prevX, prevY;
+  bool active;
+  uint32_t spawnTime;
+};
 
-// Спрайты (замените на свои)
-const uint16_t spr_01[SHIP_SIZE][SHIP_SIZE] = {0};
-const uint16_t spr_02[ASTEROID_SIZE][ASTEROID_SIZE] = {0};
+struct Asteroid {
+  float x, y, dx, dy;
+  float prevX, prevY;
+  bool active;
+};
+
+struct Game {
+  float shipX = 64, shipY = 64;
+  float prevShipX = 64, prevShipY = 64;
+  float shipAngle = 0;
+  float shipSpeedX = 0, shipSpeedY = 0;
+  int score = 0;
+  Bullet bullets[15];
+  Asteroid asteroids[MAX_ASTEROIDS];
+} game;
 
 void IRAM_ATTR encoderISR() {
   portENTER_CRITICAL_ISR(&encoderMux);
   static uint8_t lastCLK = HIGH;
   uint8_t clk = digitalRead(ENCODER_CLK);
-  
-  if(clk != lastCLK) {
-    if(digitalRead(ENCODER_DT) != clk) {
-      encoderPos++;
-    } else {
-      encoderPos--;
-    }
+  if (clk != lastCLK) {
+    if (digitalRead(ENCODER_DT) != clk) encoderPos++;
+    else encoderPos--;
     lastCLK = clk;
   }
   portEXIT_CRITICAL_ISR(&encoderMux);
 }
 
 void setup() {
-  Serial.begin(115200);
-  
-  SPI.begin(TFT_SCLK, -1, TFT_MOSI, -1);  // SCLK, MISO, MOSI, SS
-  tft.initR(INITR_BLACKTAB);
-  tft.setSPISpeed(20000000); // 20 MHz — максимум для ST7735
-
-  // Инициализация дисплея
-  tft.initR(INITR_BLACKTAB);
+  tft.init();
   tft.setRotation(0);
-  tft.fillScreen(ST7735_BLACK);
-  
-  // Настройка управления
+  tft.fillScreen(TFT_BLACK);
+
   pinMode(ENCODER_CLK, INPUT_PULLUP);
   pinMode(ENCODER_DT, INPUT_PULLUP);
   pinMode(BUTTON_A, INPUT_PULLUP);
   pinMode(BUTTON_B, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(ENCODER_CLK), encoderISR, CHANGE);
-  
-  // Инициализация игры
-  spawnAsteroids();
 }
 
 void loop() {
   static uint32_t lastPhysicsUpdate = 0;
   static uint32_t lastRenderUpdate = 0;
+  static uint32_t lastFullClear = 0;
+  static bool forceFullRedraw = false;
+
   uint32_t now = millis();
-  
-  // Обновление физики (120 FPS)
-  if(now - lastPhysicsUpdate >= (1000/PHYSICS_FPS)) {
+
+  // Очистка экрана каждые 100 мс
+  if (now - lastFullClear >= 100) {
+    tft.fillScreen(TFT_BLACK);
+    forceFullRedraw = true;
+    lastFullClear = now;
+  }
+
+  if (now - lastPhysicsUpdate >= (1000 / PHYSICS_FPS)) {
     updatePhysics();
     lastPhysicsUpdate = now;
   }
-  
-  // Отрисовка (60 FPS)
-  if(now - lastRenderUpdate >= (1000/RENDER_FPS)) {
-    renderGame();
+
+  if (now - lastRenderUpdate >= (1000 / RENDER_FPS)) {
+    renderGame(forceFullRedraw);
+    forceFullRedraw = false;
     lastRenderUpdate = now;
   }
 }
 
-void spawnAsteroids() {
-  for(int i = 0; i < game.asteroidsCount; i++) {
-    if(!game.asteroids[i].active) {
-      // Спавн у краев экрана
-      if(random(2)) {
-        game.asteroids[i].x = random(2) ? -ASTEROID_SIZE : tft.width() + ASTEROID_SIZE;
-        game.asteroids[i].y = random(tft.height());
-      } else {
-        game.asteroids[i].x = random(tft.width());
-        game.asteroids[i].y = random(2) ? -ASTEROID_SIZE : tft.height() + ASTEROID_SIZE;
-      }
-      
-      // Направление движения к центру
-      float dx = (tft.width()/2 - game.asteroids[i].x) * 0.001 * random(5, 15);
-      float dy = (tft.height()/2 - game.asteroids[i].y) * 0.001 * random(5, 15);
-      
-      game.asteroids[i].dx = dx;
-      game.asteroids[i].dy = dy;
-      game.asteroids[i].active = true;
-    }
+void updatePhysics() {
+  static int lastEncoder = 0;
+  if (encoderPos != lastEncoder) {
+    game.shipAngle += (encoderPos - lastEncoder) * 0.1;
+    lastEncoder = encoderPos;
   }
-  game.lastSpawnTime = millis();
-}
 
-void checkCollisions() {
-  // Пули с астероидами
-  for(auto &bullet : game.bullets) {
-    if(!bullet.active) continue;
-    
-    for(auto &asteroid : game.asteroids) {
-      if(!asteroid.active) continue;
-      
-      float dist = sqrt(pow(bullet.x - asteroid.x, 2) + pow(bullet.y - asteroid.y, 2));
-      if(dist < ASTEROID_SIZE/2) {
-        bullet.active = false;
-        asteroid.active = false;
-        game.score++;
-        
-        // Каждые 5 очков увеличиваем сложность
-        if(game.score % 5 == 0 && game.asteroidsCount < sizeof(game.asteroids)/sizeof(game.asteroids[0])) {
-          game.asteroidsCount++;
+  if (digitalRead(BUTTON_A) == LOW) {
+    game.shipSpeedX += cos(game.shipAngle) * 0.04;
+    game.shipSpeedY += sin(game.shipAngle) * 0.04;
+  }
+
+  if (digitalRead(BUTTON_B) == LOW) {
+    static uint32_t lastShot = 0;
+    if (millis() - lastShot > 100) {
+      for (auto &b : game.bullets) {
+        if (!b.active) {
+          b.x = game.shipX;
+          b.y = game.shipY;
+          b.prevX = b.x;
+          b.prevY = b.y;
+          b.dx = cos(game.shipAngle) * 3;
+          b.dy = sin(game.shipAngle) * 3;
+          b.spawnTime = millis();
+          b.active = true;
+          lastShot = millis();
+          break;
         }
       }
     }
   }
-  
-  // Корабль с астероидами
-  for(auto &asteroid : game.asteroids) {
-    if(!asteroid.active) continue;
-    
-    float dist = sqrt(pow(game.shipX - asteroid.x, 2) + pow(game.shipY - asteroid.y, 2));
-    if(dist < (SHIP_SIZE + ASTEROID_SIZE)/2) {
-      // Столкновение - сброс игры
-      game.shipX = tft.width()/2;
-      game.shipY = tft.height()/2;
-      game.shipSpeedX = 0;
-      game.shipSpeedY = 0;
-      game.score = max(0, game.score - 5);
-      break;
-    }
-  }
-}
 
-void updatePhysics() {
-  // Управление кораблем
-  handleControls();
-  
-  // Движение корабля
+  game.prevShipX = game.shipX;
+  game.prevShipY = game.shipY;
   game.shipX += game.shipSpeedX * GAME_SPEED;
   game.shipY += game.shipSpeedY * GAME_SPEED;
-  
-  // Трение
   game.shipSpeedX *= 0.95;
   game.shipSpeedY *= 0.95;
-  
-  // Границы экрана
-  if(game.shipX < 0) game.shipX = tft.width();
-  if(game.shipX > tft.width()) game.shipX = 0;
-  if(game.shipY < 0) game.shipY = tft.height();
-  if(game.shipY > tft.height()) game.shipY = 0;
-  
-  // Движение пуль
-  for(auto &bullet : game.bullets) {
-    if(bullet.active) {
-      bullet.x += bullet.dx * GAME_SPEED;
-      bullet.y += bullet.dy * GAME_SPEED;
-      
-      // Удаление старых пуль
-      if(millis() - bullet.spawnTime > 1000 || 
-         bullet.x < 0 || bullet.x > tft.width() || 
-         bullet.y < 0 || bullet.y > tft.height()) {
-        bullet.active = false;
-      }
-    }
-  }
-  
-  // Движение астероидов
-  for(auto &asteroid : game.asteroids) {
-    if(asteroid.active) {
-      asteroid.x += asteroid.dx * GAME_SPEED;
-      asteroid.y += asteroid.dy * GAME_SPEED;
-      
-      if(asteroid.x < -ASTEROID_SIZE) asteroid.x = tft.width();
-      if(asteroid.x > tft.width()) asteroid.x = -ASTEROID_SIZE;
-      if(asteroid.y < -ASTEROID_SIZE) asteroid.y = tft.height();
-      if(asteroid.y > tft.height()) asteroid.y = -ASTEROID_SIZE;
-    }
-  }
-  
-  // Проверка столкновений
-  checkCollisions();
-  
-  // Спавн новых астероидов
-  if(millis() - game.lastSpawnTime > 2000) {
-    spawnAsteroids();
-  }
-}
 
-void handleControls() {
-  // Поворот корабля
-  static int lastEncoderPos = 0;
-  if(encoderPos != lastEncoderPos) {
-    game.shipAngle += (encoderPos - lastEncoderPos) * 0.1;
-    lastEncoderPos = encoderPos;
+  if (game.shipX < 0) game.shipX = tft.width();
+  if (game.shipX > tft.width()) game.shipX = 0;
+  if (game.shipY < 0) game.shipY = tft.height();
+  if (game.shipY > tft.height()) game.shipY = 0;
+
+  for (auto &b : game.bullets) {
+    if (b.active) {
+      b.prevX = b.x;
+      b.prevY = b.y;
+      b.x += b.dx * GAME_SPEED;
+      b.y += b.dy * GAME_SPEED;
+      if (millis() - b.spawnTime > 1000 || b.x < 0 || b.x > tft.width() || b.y < 0 || b.y > tft.height())
+        b.active = false;
+    }
   }
-  
-  // Движение вперед
-  if(digitalRead(BUTTON_A) == LOW) {
-    float force = 0.5;
-    game.shipSpeedX += cos(game.shipAngle) * force;
-    game.shipSpeedY += sin(game.shipAngle) * force;
-  }
-  
-  // Выстрел
-  static uint32_t lastFireTime = 0;
-  if(digitalRead(BUTTON_B) == LOW && millis() - lastFireTime > 100) {
-    for(auto &bullet : game.bullets) {
-      if(!bullet.active) {
-        bullet.x = game.shipX + cos(game.shipAngle) * SHIP_SIZE/2;
-        bullet.y = game.shipY + sin(game.shipAngle) * SHIP_SIZE/2;
-        bullet.dx = cos(game.shipAngle) * 3;
-        bullet.dy = sin(game.shipAngle) * 3;
-        bullet.active = true;
-        bullet.spawnTime = millis();
-        lastFireTime = millis();
-        break;
+
+  int desiredAsteroids = 1 + (game.score / 5);
+  if (desiredAsteroids > MAX_ASTEROIDS) desiredAsteroids = MAX_ASTEROIDS;
+
+  int activeAsteroids = 0;
+  for (int i = 0; i < MAX_ASTEROIDS; i++) {
+    auto &a = game.asteroids[i];
+
+    if (!a.active && activeAsteroids < desiredAsteroids) {
+      a.x = random(2) ? -ASTEROID_SIZE : tft.width() + ASTEROID_SIZE;
+      a.y = random(tft.height());
+      float dx = (tft.width() / 2 - a.x) * 0.01;
+      float dy = (tft.height() / 2 - a.y) * 0.01;
+      a.dx = dx;
+      a.dy = dy;
+      a.active = true;
+    }
+
+    if (a.active) {
+      activeAsteroids++;
+
+      a.prevX = a.x;
+      a.prevY = a.y;
+      a.x += a.dx * (GAME_SPEED / 4.0);
+      a.y += a.dy * (GAME_SPEED / 4.0);
+      if (a.x < -ASTEROID_SIZE) a.x = tft.width();
+      if (a.x > tft.width()) a.x = -ASTEROID_SIZE;
+      if (a.y < -ASTEROID_SIZE) a.y = tft.height();
+      if (a.y > tft.height()) a.y = -ASTEROID_SIZE;
+
+      // Столкновение с кораблем
+      float dx = a.x - game.shipX;
+      float dy = a.y - game.shipY;
+      if (dx * dx + dy * dy < pow(ASTEROID_SIZE / 2 + SHIP_SIZE / 2, 2)) {
+        game.score = 0;
+      }
+
+      // Столкновение с пулями
+      for (auto &b : game.bullets) {
+        if (b.active) {
+          float bdx = a.x - b.x;
+          float bdy = a.y - b.y;
+          if (bdx * bdx + bdy * bdy < pow(ASTEROID_SIZE / 2 + BULLET_SIZE, 2)) {
+            a.active = false;
+            b.active = false;
+            game.score++;
+          }
+        }
       }
     }
   }
 }
 
-void renderGame() {
-  static float lastShipX = 0, lastShipY = 0;
-  static float lastBulletX[20] = {0}, lastBulletY[20] = {0};
-  static float lastAsteroidX[15] = {0}, lastAsteroidY[15] = {0};
-
-  // Очистка старого положения астероидов
-  for (int i = 0; i < game.asteroidsCount; i++) {
-    if (game.asteroids[i].active) {
-      tft.fillCircle((int16_t)lastAsteroidX[i], (int16_t)lastAsteroidY[i], ASTEROID_SIZE / 2, ST7735_BLACK);
-      lastAsteroidX[i] = game.asteroids[i].x;
-      lastAsteroidY[i] = game.asteroids[i].y;
-    }
-  }
-
-  // Очистка старого положения пуль
-  for (int i = 0; i < 20; i++) {
-    if (game.bullets[i].active) {
-      tft.fillCircle((int16_t)lastBulletX[i], (int16_t)lastBulletY[i], BULLET_SIZE / 2, ST7735_BLACK);
-      lastBulletX[i] = game.bullets[i].x;
-      lastBulletY[i] = game.bullets[i].y;
-    }
-  }
-
-  // Очистка корабля
-  tft.fillTriangle((int16_t)(lastShipX + cos(game.shipAngle) * SHIP_SIZE / 2),
-                   (int16_t)(lastShipY + sin(game.shipAngle) * SHIP_SIZE / 2),
-                   (int16_t)(lastShipX + cos(game.shipAngle + 2.5) * SHIP_SIZE / 3),
-                   (int16_t)(lastShipY + sin(game.shipAngle + 2.5) * SHIP_SIZE / 3),
-                   (int16_t)(lastShipX + cos(game.shipAngle - 2.5) * SHIP_SIZE / 3),
-                   (int16_t)(lastShipY + sin(game.shipAngle - 2.5) * SHIP_SIZE / 3),
-                   ST7735_BLACK);
-
-  // Отрисовка астероидов
-  for (int i = 0; i < game.asteroidsCount; i++) {
-    if (game.asteroids[i].active) {
-      tft.fillCircle((int16_t)game.asteroids[i].x, (int16_t)game.asteroids[i].y, ASTEROID_SIZE / 2, ST7735_WHITE);
-    }
-  }
-
-  // Отрисовка пуль
-  for (int i = 0; i < 20; i++) {
-    if (game.bullets[i].active) {
-      tft.fillCircle((int16_t)game.bullets[i].x, (int16_t)game.bullets[i].y, BULLET_SIZE / 2, ST7735_RED);
-    }
-  }
-
-  // Отрисовка корабля
-  float x1 = game.shipX + cos(game.shipAngle) * SHIP_SIZE / 2;
-  float y1 = game.shipY + sin(game.shipAngle) * SHIP_SIZE / 2;
-  float x2 = game.shipX + cos(game.shipAngle + 2.5) * SHIP_SIZE / 3;
-  float y2 = game.shipY + sin(game.shipAngle + 2.5) * SHIP_SIZE / 3;
-  float x3 = game.shipX + cos(game.shipAngle - 2.5) * SHIP_SIZE / 3;
-  float y3 = game.shipY + sin(game.shipAngle - 2.5) * SHIP_SIZE / 3;
-
-  tft.fillTriangle((int16_t)x1, (int16_t)y1,
-                   (int16_t)x2, (int16_t)y2,
-                   (int16_t)x3, (int16_t)y3,
-                   ST7735_BLUE);
-
-  lastShipX = game.shipX;
-  lastShipY = game.shipY;
-
-  // HUD (перерисовываем целиком, можно вынести в отдельный слой позже)
-  tft.fillRect(0, 0, 80, 20, ST7735_BLACK);
+void renderGame(bool fullRedraw) {
+  // Счёт
+  tft.fillRect(0, 0, 128, 20, TFT_BLACK);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setCursor(2, 2);
   tft.setTextSize(1);
-  tft.setCursor(5, 5);
-  tft.setTextColor(ST7735_WHITE);
   tft.print("Score: ");
   tft.print(game.score);
 
-  tft.setCursor(5, 15);
-  tft.print("Asteroids: ");
-  tft.print(game.asteroidsCount);
+  // Пули
+  for (auto &b : game.bullets) {
+    if (!b.active || fullRedraw)
+      tft.fillCircle((int)b.prevX, (int)b.prevY, BULLET_SIZE + 1, TFT_BLACK);
+    if (b.active)
+      tft.fillCircle((int)b.x, (int)b.y, BULLET_SIZE, TFT_RED);
+  }
+
+  // Астероиды
+  for (auto &a : game.asteroids) {
+    if (!a.active || fullRedraw)
+      tft.fillCircle((int)a.prevX, (int)a.prevY, ASTEROID_SIZE / 2 + 1, TFT_BLACK);
+    if (a.active)
+      tft.fillCircle((int)a.x, (int)a.y, ASTEROID_SIZE / 2, TFT_WHITE);
+  }
+
+  // Корабль
+  if (fullRedraw) {
+    drawShip(game.shipX, game.shipY, game.shipAngle, TFT_BLUE);
+  } else {
+    drawShip(game.prevShipX, game.prevShipY, game.shipAngle, TFT_BLACK);
+    drawShip(game.shipX, game.shipY, game.shipAngle, TFT_BLUE);
+  }
+}
+
+void drawShip(float x, float y, float angle, uint16_t color) {
+  float x1 = x + cos(angle) * SHIP_SIZE / 2;
+  float y1 = y + sin(angle) * SHIP_SIZE / 2;
+  float x2 = x + cos(angle + 2.5) * SHIP_SIZE / 2.5;
+  float y2 = y + sin(angle + 2.5) * SHIP_SIZE / 2.5;
+  float x3 = x + cos(angle - 2.5) * SHIP_SIZE / 2.5;
+  float y3 = y + sin(angle - 2.5) * SHIP_SIZE / 2.5;
+  tft.fillTriangle((int)x1, (int)y1, (int)x2, (int)y2, (int)x3, (int)y3, color);
 }
