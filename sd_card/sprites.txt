@@ -1,0 +1,6 @@
+# name,filename,width,height,x,y,transparent
+logo,/spr_GG_logo.bin,128,160,0,0,0
+background,/spr_start_BG.bin,128,160,0,0,0
+main_name1,/spr_main_name.bin,117,48,3,109,1
+main_name2,/spr_main_name2.bin,117,48,3,109,1
+press_rb,/spr_press_RB.bin,48,15,37,71,1
