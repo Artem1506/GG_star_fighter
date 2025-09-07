@@ -12,10 +12,14 @@ TFT_eSPI tft = TFT_eSPI();
 #define BG_HEIGHT    160
 #define NAME_WIDTH   117
 #define NAME_HEIGHT  48
-#define PRESS_WIDTH 48
+#define PRESS_WIDTH  48
 #define PRESS_HEIGHT 15
+
 // Цвет прозрачности (ярко-розовый, RGB565)
 #define TRANSPARENT_COLOR 0xF81F
+
+// Пин светодиода
+#define LED_PIN 27
 
 // ==================== SD CARD INIT ====================
 bool initSDCard() {
@@ -97,6 +101,9 @@ void setup() {
     tft.setRotation(0);
     tft.fillScreen(TFT_BLACK);
 
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, LOW);
+
     if (!initSDCard()) {
         tft.setTextColor(TFT_RED, TFT_BLACK);
         tft.setCursor(10, 70);
@@ -134,13 +141,16 @@ void loop() {
         }
     }
 
-    // Мигание spr_press_RB.bin (1 сек есть, 1 сек нет)
+    // Мигание spr_press_RB.bin (1 сек есть, 1 сек нет) + мигание светодиода
     if (now - lastPressToggle >= 1000) {
         lastPressToggle = now;
         showPress = !showPress;
 
         if (showPress) {
             displayRGB565FileTransparent("/spr_press_RB.bin", 37, 71, PRESS_WIDTH, PRESS_HEIGHT, TRANSPARENT_COLOR);
+            digitalWrite(LED_PIN, HIGH); // LED ON
+            delay(300);
+            digitalWrite(LED_PIN, LOW); // LED OFF
         } else {
             // перерисуем фон на месте кнопки (чтобы стереть)
             displayRGB565File("/spr_start_BG.bin", 37, 71, PRESS_WIDTH, PRESS_HEIGHT);
