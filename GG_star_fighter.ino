@@ -4,7 +4,23 @@
 #include <math.h>
 #include "driver/i2s.h"
 
-// ==================== DISPLAY ====================
+// ==================== DISPLAY CONFIG ====================
+#define USER_SETUP_INFO "User_Setup"
+#define ST7735_DRIVER
+#define TFT_WIDTH  128
+#define TFT_HEIGHT 160
+#define TFT_MOSI 23
+#define TFT_SCLK 18
+#define TFT_CS   5
+#define TFT_DC   21 //16
+#define TFT_RST  4 //17
+#define TFT_BL   21
+#define LOAD_GLCD
+#define LOAD_FONT2
+#define SPI_FREQUENCY  27000000
+#define SPI_READ_FREQUENCY  20000000
+#define SPI_TOUCH_FREQUENCY  2500000
+
 TFT_eSPI tft = TFT_eSPI();
 
 // Размеры спрайтов

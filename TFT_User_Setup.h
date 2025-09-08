@@ -5,8 +5,8 @@
 #define TFT_MOSI  23
 #define TFT_SCLK  18
 #define TFT_CS     5
-#define TFT_DC    21
-#define TFT_RST    4  // Или -1, если ножка не подключена
+#define TFT_DC   21 //16
+#define TFT_RST  4 //17
 
 #define LOAD_GLCD     // Загружаем стандартный шрифт
 #define LOAD_FONT2    // Маленький шрифт
