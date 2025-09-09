@@ -11,10 +11,10 @@
 #define TFT_HEIGHT 160
 #define TFT_MOSI 23
 #define TFT_SCLK 18
-#define TFT_CS   5
-#define TFT_DC   21
-#define TFT_RST  4 
-#define TFT_BL   21
+#define TFT_CS   5      
+#define TFT_DC   21    
+#define TFT_RST  4     
+#define TFT_BL   21 //фактически подключено к 3.3v   
 #define LOAD_GLCD
 #define LOAD_FONT2
 #define SPI_FREQUENCY  27000000
@@ -36,8 +36,8 @@ TFT_eSPI tft = TFT_eSPI();
 #define GOBG_HEIGHT 160
 #define GOTEXT_WIDTH  58
 #define GOTEXT_HEIGHT 35
-#define MAINBG_WIDTH  128
-#define MAINBG_HEIGHT 160
+#define MAIN_BG_WIDTH 128 
+#define MAIN_BG_HEIGHT 160
 
 #define BOOMS1_WIDTH  24
 #define BOOMS1_HEIGHT 23
@@ -90,6 +90,12 @@ TFT_eSPI tft = TFT_eSPI();
 #define ASTEROID_FAST   1
 #define FAST_ASTEROID_SPEED_MULTIPLIER 1.5f
 #define FAST_ASTEROID_SPAWN_CHANCE 50
+
+// Музыкальные треки
+const char* introTracks[] = {"/snd_intro1.wav", "/snd_intro2.wav", "/snd_intro3.wav"};
+const char* mainTracks[] = {"/snd_main1.wav", "/snd_main2.wav", "/snd_main3.wav", "/snd_main4.wav", "/snd_main5.wav"};
+const int introTracksCount = 3;
+const int mainTracksCount = 5;
 
 // ==================== WAV STRUCT ====================
 struct WavInfo {
@@ -151,6 +157,8 @@ SoundEffect soundExplosion = {350, 200, 0, false};
 bool sdInitialized = false;
 bool showLogo = true;
 uint32_t logoStartTime = 0;
+bool musicPlaying = false;
+int currentTrackIndex = -1;
 
 // Game states
 enum GameState {
@@ -179,8 +187,14 @@ const int IMG_BUFFER_PIXELS = 128;
 uint16_t imgBuffer[IMG_BUFFER_PIXELS];
 
 void displayRGB565File(const char* filename, int x, int y, int w, int h) {
+  if (!SD_MMC.exists(filename)) {
+    Serial.printf("File not found: %s\n", filename);
+    return;
+  }
+  
   File f = SD_MMC.open(filename, FILE_READ);
   if (!f) return;
+  
   for (int row = 0; row < h; row++) {
     for (int col = 0; col < w; col += IMG_BUFFER_PIXELS) {
       int toRead = min(IMG_BUFFER_PIXELS, w - col);
@@ -192,8 +206,14 @@ void displayRGB565File(const char* filename, int x, int y, int w, int h) {
 }
 
 void displayRGB565FileTransparent(const char* filename, int x, int y, int w, int h, uint16_t transparent) {
+  if (!SD_MMC.exists(filename)) {
+    Serial.printf("File not found: %s\n", filename);
+    return;
+  }
+  
   File f = SD_MMC.open(filename, FILE_READ);
   if (!f) return;
+  
   for (int row = 0; row < h; row++) {
     for (int col = 0; col < w; col += IMG_BUFFER_PIXELS) {
       int toRead = min(IMG_BUFFER_PIXELS, w - col);
@@ -267,42 +287,95 @@ bool i2sInit(uint32_t sampleRate, uint16_t bits, uint8_t ch) {
     .tx_desc_auto_clear = true,
     .fixed_mclk = 0
   };
+  
   if (i2s_driver_install(I2S_NUM_USED, &cfg, 0, NULL) != ESP_OK) return false;
+  
   i2s_pin_config_t pins = {
     .bck_io_num = I2S_BCK_PIN,
     .ws_io_num = I2S_WS_PIN,
     .data_out_num = I2S_DOUT_PIN,
     .data_in_num = I2S_PIN_NO_CHANGE
   };
+  
   if (i2s_set_pin(I2S_NUM_USED, &pins) != ESP_OK) return false;
-  i2s_set_clk(I2S_NUM_USED, sampleRate, I2S_BITS_PER_SAMPLE_16BIT, ch == 1 ? I2S_CHANNEL_MONO : I2S_CHANNEL_STEREO);
+  i2s_set_clk(I2S_NUM_USED, sampleRate, I2S_BITS_PER_SAMPLE_16BIT, 
+              ch == 1 ? I2S_CHANNEL_MONO : I2S_CHANNEL_STEREO);
   return true;
 }
 
 // Фоновая задача воспроизведения
 void playWavTask(void *param) {
-  const char* fn = (const char*)param;
-  File f = SD_MMC.open(fn, FILE_READ);
-  if (!f) { vTaskDelete(NULL); return; }
+  const char* filename = (const char*)param;
+  
+  if (!SD_MMC.exists(filename)) {
+    Serial.printf("Audio file not found: %s\n", filename);
+    vTaskDelete(NULL);
+    return;
+  }
+  
+  File f = SD_MMC.open(filename, FILE_READ);
+  if (!f) {
+    Serial.printf("Error opening audio file: %s\n", filename);
+    vTaskDelete(NULL);
+    return;
+  }
 
   WavInfo info = {0};
-  if (!parseWav(f, info)) { f.close(); vTaskDelete(NULL); return; }
-  if (!i2sInit(info.sampleRate, info.bitsPerSample, info.channels)) { f.close(); vTaskDelete(NULL); return; }
+  if (!parseWav(f, info)) {
+    Serial.printf("Invalid WAV file: %s\n", filename);
+    f.close();
+    vTaskDelete(NULL);
+    return;
+  }
+  
+  if (!i2sInit(info.sampleRate, info.bitsPerSample, info.channels)) {
+    Serial.printf("I2S init failed for: %s\n", filename);
+    f.close();
+    vTaskDelete(NULL);
+    return;
+  }
 
   f.seek(info.dataPos);
   uint8_t buf[1024];
   uint32_t left = info.dataLen;
+  
+  musicPlaying = true;
+  
   while (left > 0) {
     size_t n = f.read(buf, min((uint32_t)sizeof(buf), left));
     if (n == 0) break;
     size_t written;
     i2s_write(I2S_NUM_USED, buf, n, &written, portMAX_DELAY);
     left -= n;
+    
+    // Проверяем, не нужно ли прервать воспроизведение
+    if (currentState != STATE_MENU && currentState != STATE_GAME) {
+      break;
+    }
   }
+  
   i2s_zero_dma_buffer(I2S_NUM_USED);
   i2s_driver_uninstall(I2S_NUM_USED);
   f.close();
+  musicPlaying = false;
+  
   vTaskDelete(NULL);
+}
+
+// Функция для запуска случайного трека
+void playRandomTrack(bool isIntro) {
+  if (musicPlaying) return;
+  
+  const char** tracks = isIntro ? introTracks : mainTracks;
+  int trackCount = isIntro ? introTracksCount : mainTracksCount;
+  
+  int newIndex;
+  do {
+    newIndex = random(trackCount);
+  } while (trackCount > 1 && newIndex == currentTrackIndex);
+  
+  currentTrackIndex = newIndex;
+  xTaskCreatePinnedToCore(playWavTask, "playWav", 8192, (void*)tracks[newIndex], 1, NULL, 0);
 }
 
 // ==================== INTERRUPT ====================
@@ -541,8 +614,9 @@ void drawShip(float x, float y, float angle, uint16_t color) {
 }
 
 void renderGame(bool fullRedraw) {
+  // ✅ Отрисовываем фон геймплея вместо черного экрана
   if (fullRedraw) {
-    tft.fillScreen(TFT_BLACK);
+    displayRGB565File("/spr_main_BG.bin", 0, 0, MAIN_BG_WIDTH, MAIN_BG_HEIGHT);
   }
 
   // Счёт и уровень
@@ -568,7 +642,9 @@ void renderGame(bool fullRedraw) {
     int px = (int)b.prevX;
     int py = (int)b.prevY;
     if ((!b.active || fullRedraw) && px >= 0 && px < tft.width() && py >= 0 && py < tft.height()) {
-      tft.fillCircle(px, py, BULLET_SIZE + 1, TFT_BLACK);
+      // ✅ Восстанавливаем фон вместо черного
+      displayRGB565File("/spr_main_BG.bin", px - BULLET_SIZE - 1, py - BULLET_SIZE - 1, 
+                       BULLET_SIZE * 2 + 2, BULLET_SIZE * 2 + 2);
     }
     if (b.active) {
       tft.fillCircle((int)b.x, (int)b.y, BULLET_SIZE, TFT_RED);
@@ -581,7 +657,9 @@ void renderGame(bool fullRedraw) {
     int px = (int)a.prevX;
     int py = (int)a.prevY;
     if ((!a.active || fullRedraw) && px >= 0 && px < tft.width() && py >= 0 && py < tft.height()) {
-      tft.fillCircle(px, py, ASTEROID_SIZE / 2 + 1, TFT_BLACK);
+      // ✅ Восстанавливаем фон вместо черного
+      displayRGB565File("/spr_main_BG.bin", px - ASTEROID_SIZE/2 - 1, py - ASTEROID_SIZE/2 - 1, 
+                       ASTEROID_SIZE + 2, ASTEROID_SIZE + 2);
     }
     if (a.active) {
       uint16_t color = (a.type == ASTEROID_FAST) ? TFT_GREEN : TFT_WHITE;
@@ -593,7 +671,9 @@ void renderGame(bool fullRedraw) {
   if (fullRedraw) {
     drawShip(game.shipX, game.shipY, game.shipAngle, TFT_BLUE);
   } else {
-    drawShip(game.prevShipX, game.prevShipY, game.prevShipAngle, TFT_BLACK);
+    // ✅ Восстанавливаем фон под предыдущей позицией корабля
+    displayRGB565File("/spr_main_BG.bin", (int)game.prevShipX - SHIP_SIZE/2 - 1, 
+                     (int)game.prevShipY - SHIP_SIZE/2 - 1, SHIP_SIZE + 2, SHIP_SIZE + 2);
     drawShip(game.shipX, game.shipY, game.shipAngle, TFT_BLUE);
   }
 }
@@ -647,18 +727,26 @@ void setup() {
   Serial.begin(115200);
   delay(500);
   
+  // ✅ Правильная инициализация кнопок для избежания ложных срабатываний
+  pinMode(ENCODER_CLK, INPUT);
+  pinMode(ENCODER_DT, INPUT);
+  pinMode(ENCODER_SW, INPUT);
+  pinMode(BUTTON_A, INPUT);
+  pinMode(BUTTON_B, INPUT);
+  delay(100);
+  pinMode(ENCODER_CLK, INPUT_PULLUP);
+  pinMode(ENCODER_DT, INPUT_PULLUP);
+  pinMode(ENCODER_SW, INPUT_PULLUP);
+  pinMode(BUTTON_A, INPUT_PULLUP);
+  pinMode(BUTTON_B, INPUT_PULLUP);
+  delay(100);
+  
   tft.init();
   tft.setRotation(0);
   tft.fillScreen(TFT_BLACK);
   
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
-  
-  pinMode(ENCODER_CLK, INPUT_PULLUP);
-  pinMode(ENCODER_DT, INPUT_PULLUP);
-  pinMode(ENCODER_SW, INPUT_PULLUP);
-  pinMode(BUTTON_A, INPUT_PULLUP);
-  pinMode(BUTTON_B, INPUT_PULLUP);
   
   attachInterrupt(digitalPinToInterrupt(ENCODER_CLK), encoderISR, CHANGE);
   
@@ -672,8 +760,8 @@ void setup() {
     displayRGB565File("/spr_GG_logo.bin", 0, 0, LOGO_WIDTH, LOGO_HEIGHT);
     delay(2000);
     
-    // 2) Запускаем музыку в отдельной задаче
-    xTaskCreatePinnedToCore(playWavTask, "playWav", 8192, (void*)"/snd_intro1.wav", 1, NULL, 0);
+    // 2) Запускаем случайный интро-трек
+    playRandomTrack(true);
     
     // 3) Показываем фон меню
     displayRGB565File("/spr_start_BG.bin", 0, 0, BG_WIDTH, BG_HEIGHT);
@@ -711,8 +799,17 @@ void loop() {
   static uint32_t lastRenderUpdate = 0;
   static uint32_t lastFullClear = 0;
   static bool forceFullRedraw = false;
+  static unsigned long lastMusicCheck = 0;
 
   unsigned long now = millis();
+
+  // ✅ Проверяем завершение музыки и запускаем новую
+  if (now - lastMusicCheck >= 1000) {
+    lastMusicCheck = now;
+    if (!musicPlaying && (currentState == STATE_MENU || currentState == STATE_GAME)) {
+      playRandomTrack(currentState == STATE_MENU);
+    }
+  }
 
   // Проверка нажатия кнопки энкодера
   static bool lastButtonState = HIGH;
@@ -723,12 +820,18 @@ void loop() {
     if (currentState == STATE_MENU) {
       // Переход из меню в игру
       currentState = STATE_GAME;
-      tft.fillScreen(TFT_BLACK);
+      // ✅ Запускаем игровой трек
+      playRandomTrack(false);
+      // ✅ Отрисовываем игровой фон
+      displayRGB565File("/spr_main_BG.bin", 0, 0, MAIN_BG_WIDTH, MAIN_BG_HEIGHT);
     } else if (currentState == STATE_GAME_OVER) {
       // Переход из Game Over в игру
       resetGame();
       currentState = STATE_GAME;
-      tft.fillScreen(TFT_BLACK);
+      // ✅ Запускаем игровой трек
+      playRandomTrack(false);
+      // ✅ Отрисовываем игровой фон
+      displayRGB565File("/spr_main_BG.bin", 0, 0, MAIN_BG_WIDTH, MAIN_BG_HEIGHT);
     }
   }
   lastButtonState = currentButtonState;
@@ -736,7 +839,7 @@ void loop() {
   switch (currentState) {
     case STATE_MENU:
       // Анимация меню
-      if (now - lastToggle >= 1500) {
+      if (now - lastToggle >= 1000) { // ✅ Изменено на 1 секунду
         lastToggle = now;
         showAlt = !showAlt;
         if (showAlt) {
@@ -746,13 +849,14 @@ void loop() {
         }
       }
 
-      if (now - lastPressToggle >= 1000) {
+      if (now - lastPressToggle >= 500) { // ✅ Изменено на 0.5 секунды
         lastPressToggle = now;
         showPress = !showPress;
         if (showPress) {
           displayRGB565FileTransparent("/spr_press_RB.bin", 37, 71, PRESS_WIDTH, PRESS_HEIGHT, TRANSPARENT_COLOR);
           digitalWrite(LED_PIN, HIGH);
         } else {
+          // ✅ Восстанавливаем фон вместо черного
           displayRGB565File("/spr_start_BG.bin", 37, 71, PRESS_WIDTH, PRESS_HEIGHT);
           digitalWrite(LED_PIN, LOW);
         }
