@@ -12,8 +12,8 @@
 #define TFT_MOSI 23
 #define TFT_SCLK 18
 #define TFT_CS   5
-#define TFT_DC   21 //16
-#define TFT_RST  4 //17
+#define TFT_DC   21
+#define TFT_RST  4 
 #define TFT_BL   21
 #define LOAD_GLCD
 #define LOAD_FONT2
@@ -32,6 +32,23 @@ TFT_eSPI tft = TFT_eSPI();
 #define NAME_HEIGHT  48
 #define PRESS_WIDTH  48
 #define PRESS_HEIGHT 15
+#define GOBG_WIDTH  128
+#define GOBG_HEIGHT 160
+#define GOTEXT_WIDTH  58
+#define GOTEXT_HEIGHT 35
+#define MAINBG_WIDTH  128
+#define MAINBG_HEIGHT 160
+
+#define BOOMS1_WIDTH  24
+#define BOOMS1_HEIGHT 23
+#define BOOMS2_WIDTH  24
+#define BOOMS2_HEIGHT 23
+#define BOOMS3_WIDTH  24
+#define BOOMS3_HEIGHT 23
+#define BOOMS4_WIDTH  24
+#define BOOMS4_HEIGHT 23
+#define BOOMS5_WIDTH  24
+#define BOOMS5_HEIGHT 23
 
 #define TRANSPARENT_COLOR 0xF81F
 
