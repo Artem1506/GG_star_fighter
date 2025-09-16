@@ -195,5 +195,33 @@ void drawGameOver(int score, int highscore) {
         explosion.startAt(position);
         activeAnimations.push_back(explosion);
     }
+
+    void Graphics::drawSprite(int16_t x, int16_t y, const uint8_t* bitmap) {
+        // Проверка указателя
+        if (!bitmap) {
+            Serial.println("Error: Null bitmap pointer");
+            return;
+        }
+
+        // Проверка границ экрана
+        if (x >= DISPLAY_WIDTH || y >= DISPLAY_HEIGHT ||
+            x + spriteWidth <= 0 || y + spriteHeight <= 0) {
+            return; // Спрайт полностью вне экрана
+        }
+
+        // Частичная отрисовка для спрайтов на границе
+        int16_t drawX = max(x, 0);
+        int16_t drawY = max(y, 0);
+        int16_t endX = min(x + spriteWidth, DISPLAY_WIDTH);
+        int16_t endY = min(y + spriteHeight, DISPLAY_HEIGHT);
+
+        // Отрисовка только видимой части
+        for (int16_t py = drawY; py < endY; py++) {
+            for (int16_t px = drawX; px < endX; px++) {
+                // ... отрисовка пикселей
+            }
+        }
+    }
+
     // TODO: добавить спрайт "Game Over"
 }

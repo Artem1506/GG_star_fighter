@@ -3,6 +3,7 @@
 #include "graphics.h"
 #include "audio.h"
 #include <random>
+#include <cmath>
 
 extern AnimationManager animationManager;
 extern AudioManager audio;
@@ -11,6 +12,31 @@ extern AudioManager audio;
 static Ship player;
 static Bullet bullets[MAX_BULLETS];
 static Asteroid asteroids[MAX_ASTEROIDS];
+
+const float DEG_PER_RAD = 180.0f / M_PI;
+const int SPRITE_COUNT = 17;
+const float ANGLE_STEP = 360.0f / SPRITE_COUNT;
+
+// Альтернативный способ с предварительным расчетом
+int Comet::calculateSpriteIndexOptimized() const {
+    // Использование предварительно рассчитанной таблицы
+    static const float angleThresholds[] = {
+        10.0f, 30.0f, 50.0f, 70.0f, 90.0f, 110.0f, 130.0f,
+        150.0f, 170.0f, 190.0f, 210.0f, 230.0f, 250.0f,
+        270.0f, 290.0f, 310.0f, 330.0f
+    };
+
+    float angle = atan2(velocity.y, velocity.x) * DEG_PER_RAD;
+    if (angle < 0) angle += 360.0f;
+
+    for (int i = 0; i < SPRITE_COUNT; ++i) {
+        if (angle < angleThresholds[i]) {
+            return i;
+        }
+    }
+
+    return 0;
+}
 
 static unsigned long lastBulletTime = 0;
 
@@ -205,6 +231,12 @@ void SpawnManager::update(int playerScore) {
     }
 }
 
+void SpawnManager::spawnAsteroid() {
+    auto asteroid = std::make_unique<Asteroid>();
+    // Инициализация asteroid
+    asteroids.push_back(std::move(asteroid));
+}
+
 void SpawnManager::spawnComet() {
     Comet* comet = new Comet();
     comet->position = getSpawnPositionOutsideScreen();
@@ -228,4 +260,9 @@ Vector2D SpawnManager::getSpawnPositionOutsideScreen() {
     case 3: return Vector2D(-20, rand() % SCREEN_HEIGHT); // left
     }
     return Vector2D(0, 0);
+}
+
+void SpawnManager::clearAll() {
+    asteroids.clear();  // Автоматическое освобождение памяти
+    comets.clear();     // Автоматическое освобождение памяти
 }

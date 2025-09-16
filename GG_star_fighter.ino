@@ -14,6 +14,9 @@ TFT_eSPI tft = TFT_eSPI();   // создаём глобальный диспле
 GameManager game;
 StorageManager storage;
 AudioManager audio;
+StateMachine stateMachine;
+StorageManager storage;
+CollisionSystem collisionSystem;
 
 void setup() {
     Serial.begin(115200);
@@ -24,13 +27,16 @@ void setup() {
     storage.initSD();
     audio.init();
   
+    stateMachine.changeState(new LogoState());
+    
     game.changeState(STATE_LOGO);
 }
 
 void loop() {
   input.update();
   audio.update();
-  
+  stateMachine.update();
+
   switch(game.getCurrentState()) {
     case STATE_LOGO:
       updateLogoState();
@@ -50,6 +56,14 @@ void loop() {
     
     // Отрисовка анимаций
     animationManager.render();
+
+// Отрисовка
+    display.clear();
+    stateMachine.render();
+    display.present();
+    
+    // Управление FPS
+    delay(16); // ~60 FPS
 
   display.render();
 }

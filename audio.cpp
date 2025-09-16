@@ -1,4 +1,6 @@
 #include "audio.h"
+#include <string>
+#include <array>
 #include <driver/i2s.h>
 #include <SD_MMC.h>
 
@@ -123,6 +125,13 @@ void playRandomMain() {
     xTaskCreatePinnedToCore(playWavTask, "music", 4096, (void*)mainTracks[idx], 1, &musicTaskHandle, 1);
 }
 
+void Audio::playWAV(const char* filename) {
+    // Способ 1: Использование std::string
+    std::string path = "/audio/";
+    path += filename;
+    playWAVFile(path.c_str());
+}
+
 // ==================== Эффекты через buzzer ====================
 void playEffect(SoundEffect effect) {
     switch (effect) {
@@ -142,4 +151,34 @@ void playEffect(SoundEffect effect) {
 void updateAudio() {
     // Здесь можно обновлять спецэффекты (например вибрато лазера)
     // Сейчас заглушка
+}
+
+class PathHelper {
+public:
+    static bool makePath(char* buffer, size_t bufferSize,
+        const char* directory, const char* filename) {
+        if (!buffer || !directory || !filename) return false;
+
+        size_t dirLen = strlen(directory);
+        size_t fileLen = strlen(filename);
+
+        if (dirLen + fileLen + 2 > bufferSize) { // +2 для '/' и '\0'
+            return false;
+        }
+
+        strcpy(buffer, directory);
+        if (buffer[dirLen - 1] != '/') {
+            buffer[dirLen] = '/';
+            dirLen++;
+        }
+        strcpy(buffer + dirLen, filename);
+
+        return true;
+    }
+};
+
+// Использование:
+char safePath[256];
+if (PathHelper::makePath(safePath, sizeof(safePath), "/audio", filename)) {
+    playWAVFile(safePath);
 }

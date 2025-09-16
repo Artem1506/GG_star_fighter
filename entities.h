@@ -2,6 +2,7 @@
 #define ENTITIES_H
 
 #pragma once
+#include <memory>
 #include <vector>
 #include "Vector2D.h"
 #include <Arduino.h>
@@ -100,6 +101,10 @@ public:
     void clearAll();
 
     std::vector<Asteroid*> asteroids;
+
+private:
+    std::vector<std::unique_ptr<Asteroid>> asteroids;
+    std::vector<std::unique_ptr<Comet>> comets;
 
 private:
     Vector2D getSpawnPositionOutsideScreen();
