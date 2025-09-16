@@ -1,4 +1,7 @@
 #include "graphics.h"
+#include "storage.h"
+
+extern StorageManager storage;
 
 // Глобальный указатель на дисплей
 static TFT_eSPI* tft;
@@ -146,5 +149,51 @@ void drawGameOver(int score, int highscore) {
     tft->setTextColor(TFT_YELLOW, TFT_BLACK);
     tft->drawString("PRESS TO RESTART", SCREEN_WIDTH / 2, SCREEN_HEIGHT - 20);
 
+
+    void Animation::init(const char* spriteSheetPath, int frameCount, float frameDuration) {
+        // Загрузка спрайтов из SD-карты
+        for (int i = 0; i < frameCount; i++) {
+            char framePath[50];
+            sprintf(framePath, "%s_%d.bin", spriteSheetPath, i);
+            frames.push_back(strdup(framePath));
+        }
+        this->durationPerFrame = frameDuration;
+    }
+
+    void Animation::startAt(const Vector2D & pos) {
+        position = pos;
+        currentFrame = 0;
+        startTime = millis();
+        lastFrameTime = startTime;
+        active = true;
+    }
+
+    void Animation::update() {
+        if (!active) return;
+
+        unsigned long currentTime = millis();
+        if (currentTime - lastFrameTime >= durationPerFrame * 1000) {
+            currentFrame++;
+            lastFrameTime = currentTime;
+
+            if (currentFrame >= frames.size()) {
+                active = false;
+            }
+        }
+    }
+
+    void AnimationManager::createExplosion(const Vector2D & position) {
+        Animation explosion;
+        explosion.init("/spr_explosion", 8, 0.1f); // 8 кадров, 0.1 сек на кадр
+        explosion.startAt(position);
+        activeAnimations.push_back(explosion);
+    }
+
+    void AnimationManager::createShipExplosion(const Vector2D & position) {
+        Animation explosion;
+        explosion.init("/spr_ship_explosion", 12, 0.15f); // 12 кадров, 0.15 сек на кадр
+        explosion.startAt(position);
+        activeAnimations.push_back(explosion);
+    }
     // TODO: добавить спрайт "Game Over"
 }

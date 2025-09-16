@@ -13,24 +13,20 @@ bool storageInit() {
 }
 
 // ==================== Загрузка рекорда ====================
-unsigned long loadHighscore() {
-    File f = SD_MMC.open(HIGH_FILE);
-    if (!f) {
-        Serial.println("No highscore file, starting from 0");
-        return 0;
-    }
-    unsigned long hs = f.parseInt();
-    f.close();
-    return hs;
+int StorageManager::readHighScore() {
+    File file = SD.open("/highscore.txt");
+    if (!file) return 0;
+
+    int highScore = file.parseInt();
+    file.close();
+    return highScore;
 }
 
 // ==================== Сохранение рекорда ====================
-void saveHighscore(unsigned long score) {
-    File f = SD_MMC.open(HIGH_FILE, FILE_WRITE);
-    if (!f) {
-        Serial.println("Failed to open highscore file for writing!");
-        return;
+void StorageManager::writeHighScore(int score) {
+    File file = SD.open("/highscore.txt", FILE_WRITE);
+    if (file) {
+        file.println(score);
+        file.close();
     }
-    f.println(score);
-    f.close();
 }

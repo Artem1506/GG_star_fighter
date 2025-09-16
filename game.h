@@ -4,17 +4,28 @@
 #include <Arduino.h>
 #include "entities.h"
 
-// ==================== Состояния игры ====================
 enum GameState {
-    STATE_INTRO,
-    STATE_MENU,
-    STATE_PLAYING,
-    STATE_GAMEOVER
+	STATE_LOGO,
+	STATE_MENU,
+	STATE_PLAY,
+	STATE_GAME_OVER
 };
 
-// ==================== Интерфейс ====================
-void gameInit();
-void gameUpdate();
-void gameRender();
+class GameManager {
+public:
+	void init();
+	void update();
+	void changeState(GameState newState);
+
+	GameState getCurrentState() { return currentState; }
+	int getScore() { return score; }
+	void setScore(int newScore) { score = newScore; }
+
+private:
+	GameState currentState;
+	int score;
+	int highScore;
+	unsigned long stateStartTime;
+};
 
 #endif

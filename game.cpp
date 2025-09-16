@@ -2,6 +2,7 @@
 #include "graphics.h"
 #include "input.h"
 #include "audio.h"
+#include "entities.h"
 #include <SD_MMC.h>
 
 // ==================== Константы ====================
@@ -38,6 +39,45 @@ void gameInit() {
     delay(3000);
 
     state = STATE_MENU;
+}
+extern SpawnManager spawnManager;
+
+void GameManager::updatePlayState() {
+    // Обновление игровой логики
+    ship.update();
+
+    // Обновление системы спавна с учетом счета
+    spawnManager.update(score);
+
+    // Обновление всех астероидов
+    for (auto& asteroid : spawnManager.asteroids) {
+        asteroid->update();
+    }
+}
+
+void GameManager::changeState(GameState newState) {
+    currentState = newState;
+    stateStartTime = millis();
+
+    switch (newState) {
+    case STATE_LOGO:
+        // Инициализация логотипа
+        break;
+    case STATE_MENU:
+        // Запуск меню музыки
+        audio.playRandomIntro();
+        break;
+    case STATE_PLAY:
+        // Сброс игровых параметров
+        resetGame();
+        audio.playRandomMain();
+        break;
+    case STATE_GAME_OVER:
+        // Проверка рекорда
+        checkHighScore();
+        audio.playRandomGameOver();
+        break;
+    }
 }
 
 // ==================== Основной цикл ====================

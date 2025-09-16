@@ -1,6 +1,9 @@
 #ifndef GRAPHICS_H
 #define GRAPHICS_H
 
+#pragma once
+#include "Vector2D.h"
+#include <vector>
 #include <Arduino.h>
 #include <TFT_eSPI.h>
 
@@ -55,5 +58,35 @@ void drawScore(int score);
 
 // ==================== Ёкран завершени€ ====================
 void drawGameOver(int score, int highscore);
+
+class Animation {
+public:
+    void init(const char* spriteSheetPath, int frameCount, float frameDuration);
+    void startAt(const Vector2D& position);
+    void update();
+    void draw();
+    bool isFinished() const;
+    bool isActive() const;
+
+private:
+    std::vector<const char*> frames;
+    Vector2D position;
+    int currentFrame;
+    unsigned long startTime;
+    unsigned long lastFrameTime;
+    float durationPerFrame;
+    bool active;
+};
+
+class AnimationManager {
+public:
+    void update();
+    void render();
+    void createExplosion(const Vector2D& position);
+    void createShipExplosion(const Vector2D& position);
+    void createBulletImpact(const Vector2D& position);
+
+    std::vector<Animation> activeAnimations;
+};
 
 #endif

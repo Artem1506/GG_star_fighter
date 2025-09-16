@@ -1,4 +1,11 @@
 #include "entities.h"
+#include "game.h"
+#include "graphics.h"
+#include "audio.h"
+#include <random>
+
+extern AnimationManager animationManager;
+extern AudioManager audio;
 
 // ==================== Глобальные переменные ====================
 static Ship player;
@@ -6,6 +13,32 @@ static Bullet bullets[MAX_BULLETS];
 static Asteroid asteroids[MAX_ASTEROIDS];
 
 static unsigned long lastBulletTime = 0;
+
+void handleBulletAsteroidCollision(Bullet& bullet, Asteroid& asteroid) {
+    // Создаем анимацию взрыва
+    animationManager.createExplosion(asteroid.position);
+
+    // Проигрываем звук
+    audio.playHit();
+
+    // Уничтожаем объекты
+    bullet.active = false;
+    asteroid.active = false;
+
+    // Добавляем очки
+    game.addScore(1);
+}
+
+void handleShipAsteroidCollision(Ship& ship, Asteroid& asteroid) {
+    // Анимация взрыва корабля
+    animationManager.createShipExplosion(ship.position);
+
+    // Звук столкновения
+    audio.playCrash();
+
+    // Переход в состояние game over
+    game.changeState(STATE_GAME_OVER);
+}
 
 // ==================== Инициализация ====================
 void initEntities() {
@@ -143,4 +176,56 @@ bool checkShipCollision(int asteroidIdx) {
         return true;
     }
     return false;
+}
+
+void Comet::update() {
+    // Движение на 50% быстрее астероида
+    position.x += velocity.x * 1.5f;
+    position.y += velocity.y * 1.5f;
+
+    // Выбор спрайта на основе направления
+    directionSpriteIndex = (int)(atan2(velocity.y, velocity.x) * 180 / PI) / 10;
+    directionSpriteIndex = (directionSpriteIndex + 36) % 36; // нормализация
+}
+
+void SpawnManager::update(int playerScore) {
+    // Определяем целевое количество астероидов
+    int targetCount = 1 + (playerScore / 5);
+
+    // Спавним новые астероиды/кометы если нужно
+    int currentCount = asteroids.size();
+    if (currentCount < targetCount) {
+        // Вероятность кометы = счет * 5%
+        if (rand() % 100 < playerScore * 5) {
+            spawnComet();
+        }
+        else {
+            spawnAsteroid();
+        }
+    }
+}
+
+void SpawnManager::spawnComet() {
+    Comet* comet = new Comet();
+    comet->position = getSpawnPositionOutsideScreen();
+    comet->velocity = getRandomDirection() * (2.0f * 1.5f); // +50% скорости
+    comet->directionSpriteIndex = rand() % 17; // случайный спрайт
+
+    // Вычисляем правильный спрайт на основе направления движения
+    float angle = atan2(comet->velocity.y, comet->velocity.x);
+    comet->directionSpriteIndex = static_cast<int>((angle * 180 / M_PI) / 10) % 17;
+
+    asteroids.push_back(comet);
+}
+
+Vector2D SpawnManager::getSpawnPositionOutsideScreen() {
+    // Спавн за пределами экрана (0-3: top, right, bottom, left)
+    int side = rand() % 4;
+    switch (side) {
+    case 0: return Vector2D(rand() % SCREEN_WIDTH, -20); // top
+    case 1: return Vector2D(SCREEN_WIDTH + 20, rand() % SCREEN_HEIGHT); // right
+    case 2: return Vector2D(rand() % SCREEN_WIDTH, SCREEN_HEIGHT + 20); // bottom
+    case 3: return Vector2D(-20, rand() % SCREEN_HEIGHT); // left
+    }
+    return Vector2D(0, 0);
 }
