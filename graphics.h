@@ -59,6 +59,18 @@ void drawScore(int score);
 // ==================== Экран завершения ====================
 void drawGameOver(int score, int highscore);
 
+class Graphics {
+public:
+    bool init();
+    void drawSprite(int16_t x, int16_t y, const uint8_t* bitmap);
+    void clear();
+    void present();
+
+    // Константы экрана (настройте под ваш дисплей)
+    static const int16_t SCREEN_WIDTH = 240;
+    static const int16_t SCREEN_HEIGHT = 320;
+};
+
 class Animation {
 public:
     void init(const char* spriteSheetPath, int frameCount, float frameDuration);

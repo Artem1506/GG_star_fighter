@@ -13,6 +13,15 @@
 #define BULLET_SPEED  4.0f
 #define ASTEROID_BASE_SPEED 1.0f
 
+
+Asteroid asteroids[MAX_ASTEROIDS];
+Bullet bullets[MAX_BULLETS];
+Ship playerShip;
+
+uint8_t asteroidCount = 0;
+uint8_t bulletCount = 0;
+uint16_t gameScore = 0;
+
 // ==================== Глобальные переменные ====================
 static GameState state = STATE_INTRO;
 static Ship player;
@@ -81,6 +90,86 @@ void GameManager::changeState(GameState newState) {
 }
 
 // ==================== Основной цикл ====================
+
+// game.cpp - ОПТИМИЗИРОВАННАЯ ПРОВЕРКА КОЛЛИЗИЙ
+void updateCollisions() {
+    // 1. ПУЛИ -> АСТЕРОИДЫ (самые частые коллизии)
+    for (uint8_t b = 0; b < bulletCount; b++) {
+        if (!bullets[b].base.active) continue;
+
+        for (uint8_t a = 0; a < asteroidCount; a++) {
+            if (!asteroids[a].base.active) continue;
+
+            // СУПЕР-БЫСТРАЯ ПРОВЕРКА
+            if (checkBulletAsteroidCollision(
+                bullets[b].base.x, bullets[b].base.y,
+                asteroids[a].base.x, asteroids[a].base.y,
+                asteroids[a].size)) {
+
+                // Коллизия detected - обработка
+                handleBulletAsteroidCollision(b, a);
+                break; // Пуля может уничтожить только один астероид
+            }
+        }
+    }
+
+    // 2. КОРАБЛЬ -> АСТЕРОИДЫ (менее частые)
+    for (uint8_t a = 0; a < asteroidCount; a++) {
+        if (!asteroids[a].base.active) continue;
+
+        if (checkShipAsteroidCollision(
+            playerShip.base.x, playerShip.base.y,
+            asteroids[a].base.x, asteroids[a].base.y,
+            asteroids[a].size)) {
+
+            handleShipAsteroidCollision(a);
+            break; // Достаточно одного столкновения
+        }
+    }
+}
+
+void updateGame() {
+    // Обновление корабля
+    if (playerShip.boosting) {
+        updateShip(&playerShip, 0.15f);
+    }
+    else {
+        playerShip.base.x += playerShip.base.vx;
+        playerShip.base.y += playerShip.base.vy;
+    }
+
+    // БЫСТРЫЕ коллизии корабля с астероидами
+    for (uint8_t i = 0; i < asteroidCount; i++) {
+        if (asteroids[i].base.active) {
+            if (checkCollision(playerShip.base.x, playerShip.base.y, 8.0f,
+                asteroids[i].base.x, asteroids[i].base.y, asteroids[i].size)) {
+                gameOver();
+                return;
+            }
+        }
+    }
+
+    // Обновление остальных объектов
+    updateAsteroids();
+    updateBullets();
+}
+
+void updateAsteroids() {
+    for (uint8_t i = 0; i < asteroidCount; i++) {
+        if (asteroids[i].base.active) {
+            asteroids[i].base.x += asteroids[i].base.vx;
+            asteroids[i].base.y += asteroids[i].base.vy;
+
+            // Быстрая проверка границ
+            if (asteroids[i].base.x < -20) asteroids[i].base.x = Graphics::SCREEN_WIDTH + 20;
+            else if (asteroids[i].base.x > Graphics::SCREEN_WIDTH + 20) asteroids[i].base.x = -20;
+
+            if (asteroids[i].base.y < -20) asteroids[i].base.y = Graphics::SCREEN_HEIGHT + 20;
+            else if (asteroids[i].base.y > Graphics::SCREEN_HEIGHT + 20) asteroids[i].base.y = -20;
+        }
+    }
+}
+
 void gameUpdate() {
     updateInput();
     InputState in = getInput();

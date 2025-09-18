@@ -33,37 +33,22 @@ void setup() {
 }
 
 void loop() {
-  input.update();
-  audio.update();
-  stateMachine.update();
-
-  switch(game.getCurrentState()) {
-    case STATE_LOGO:
-      updateLogoState();
-      break;
-    case STATE_MENU:
-      updateMenuState();
-      break;
-    case STATE_PLAY:
-      updatePlayState();
-      break;
-    case STATE_GAME_OVER:
-      updateGameOverState();
-      break;
-  }
-
-    animationManager.update();
+    uint32_t frameStart = millis();
     
-    // Отрисовка анимаций
-    animationManager.render();
-
-// Отрисовка
-    display.clear();
-    stateMachine.render();
-    display.present();
+    // 1. Ввод (максимально быстро)
+    readInputs();
     
-    // Управление FPS
-    delay(16); // ~60 FPS
-
-  display.render();
+    // 2. Обновление игры
+    updateGame();
+    
+    // 3. Отрисовка
+    graphics.clear();
+    drawGame();
+    graphics.present();
+    
+    // 4. Точный контроль FPS (60 FPS = 16.67ms на кадр)
+    uint32_t frameTime = millis() - frameStart;
+    if (frameTime < 16) {
+        delay(16 - frameTime);
+    }
 }

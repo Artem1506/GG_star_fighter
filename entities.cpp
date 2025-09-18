@@ -17,6 +17,14 @@ const float DEG_PER_RAD = 180.0f / M_PI;
 const int SPRITE_COUNT = 17;
 const float ANGLE_STEP = 360.0f / SPRITE_COUNT;
 
+// Предварительно вычисленная таблица косинусов (0-360 градусов с шагом 10)
+const int8_t COS_TABLE[36] = {
+    100, 98, 94, 87, 77, 64, 50, 34, 17, 0,
+    -17, -34, -50, -64, -77, -87, -94, -98, -100,
+    -98, -94, -87, -77, -64, -50, -34, -17, 0,
+    17, 34, 50, 64, 77, 87, 94, 98
+};
+
 // Альтернативный способ с предварительным расчетом
 int Comet::calculateSpriteIndexOptimized() const {
     // Использование предварительно рассчитанной таблицы
@@ -89,19 +97,27 @@ Bullet* getBullets() { return bullets; }
 Asteroid* getAsteroids() { return asteroids; }
 
 // ==================== Обновление корабля ====================
-void updateShip(bool moveForward) {
-    if (!player.alive) return;
+void updateShip(Ship* ship, float thrustPower) {
+    // БЫСТРЫЙ расчет thrust через таблицу
+    int angleIndex = (ship->rotation % 360) / 10;
+    if (angleIndex < 0) angleIndex += 36;
 
-    if (moveForward) {
-        player.x += SHIP_SPEED * cos(radians(player.angle));
-        player.y += SHIP_SPEED * sin(radians(player.angle));
-    }
+    float thrustX = COS_TABLE[angleIndex] * 0.01f * thrustPower;
+    float thrustY = COS_TABLE[(angleIndex + 9) % 36] * 0.01f * thrustPower;
 
-    // Зацикливание на краях экрана (wrap-around)
-    if (player.x < 0) player.x = 127;
-    if (player.x > 127) player.x = 0;
-    if (player.y < 0) player.y = 63;
-    if (player.y > 63) player.y = 0;
+    ship->base.vx += thrustX;
+    ship->base.vy += thrustY;
+
+    // Обновление позиции
+    ship->base.x += ship->base.vx;
+    ship->base.y += ship->base.vy;
+
+    // СУПЕР-БЫСТРАЯ обработка границ
+    if (ship->base.x < 0) ship->base.x = Graphics::SCREEN_WIDTH;
+    else if (ship->base.x > Graphics::SCREEN_WIDTH) ship->base.x = 0;
+
+    if (ship->base.y < 0) ship->base.y = Graphics::SCREEN_HEIGHT;
+    else if (ship->base.y > Graphics::SCREEN_HEIGHT) ship->base.y = 0;
 }
 
 // ==================== Пули ====================
@@ -180,6 +196,12 @@ void updateAsteroids(unsigned long score) {
     }
 }
 
+bool checkCollision(float x1, float y1, float r1, float x2, float y2, float r2) {
+    float dx = x1 - x2;
+    float dy = y1 - y2;
+    return (dx * dx + dy * dy) < ((r1 + r2) * (r1 + r2));
+}
+
 // ==================== Коллизии ====================
 bool checkBulletHitAsteroid(int bulletIdx, int asteroidIdx) {
     if (!bullets[bulletIdx].active || !asteroids[asteroidIdx].active) return false;
@@ -202,6 +224,27 @@ bool checkShipCollision(int asteroidIdx) {
         return true;
     }
     return false;
+}
+
+void Ship::update() {
+    // Вместо position.x += velocity.x;
+    x += velocityX;
+    y += velocityY;
+
+    // Обработка границ экрана
+    if (x < 0) x = DISPLAY_WIDTH;
+    if (x > DISPLAY_WIDTH) x = 0;
+    if (y < 0) y = DISPLAY_HEIGHT;
+    if (y > DISPLAY_HEIGHT) y = 0;
+}
+
+void Ship::applyThrust() {
+    // Простой расчет thrust вместо Vector2D
+    float thrustX = cos(rotation * M_PI / 180.0) * thrustPower;
+    float thrustY = sin(rotation * M_PI / 180.0) * thrustPower;
+
+    velocityX += thrustX;
+    velocityY += thrustY;
 }
 
 void Comet::update() {

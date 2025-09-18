@@ -4,30 +4,33 @@
 #pragma once
 #include <memory>
 #include <vector>
-#include "Vector2D.h"
 #include <Arduino.h>
 
 // ==================== Корабль ====================
 struct Ship {
-    float x, y;
-    int angle;       // угол (градусы)
-    bool alive;
+    Entity base;       // базовая структура
+    bool boosting;     // ускорение
+    uint16_t lastShot; // время выстрела (в ms/10 для экономии)
+    int8_t rotation;   // угол (-128 to 127 градусов)
 };
 
 // ==================== Пуля ====================
 struct Bullet {
-    float x, y;
-    float dx, dy;
-    bool active;
-    unsigned long spawnTime;
+    Entity base;
+    uint16_t spawnTime; // время создания
 };
 
 // ==================== Астероид ====================
 struct Asteroid {
-    float x, y;
-    float dx, dy;
-    bool active;
-    int comet;      // быстрый астероид
+    Entity base;       // базовая структура  
+    uint8_t size;      // размер (0-255)
+};
+
+struct Entity {
+    float x, y;        // позиция
+    float vx, vy;      // скорость
+    uint8_t type;      // тип объекта
+    bool active;       // флаг активности
 };
 
 // ==================== Константы ====================
@@ -54,16 +57,17 @@ void updateAsteroids(unsigned long score);
 bool checkBulletHitAsteroid(int bulletIdx, int asteroidIdx);
 bool checkShipCollision(int asteroidIdx);
 
-class Asteroid {
+class Asteroid : public Entity {
 public:
-    virtual void update();
-    virtual void draw();
-    virtual void destroy();
+    void update();
+    void draw();
+};
 
-    Vector2D position;
-    Vector2D velocity;
-    float size;
-    bool active;
+class Bullet : public Entity {
+public:
+    void update();
+    void draw();
+    unsigned long spawnTime;
 };
 
 class Comet : public Asteroid {
@@ -76,17 +80,12 @@ private:
     int directionSpriteIndex; // индекс спрайта из 17 вариантов
 };
 
-class Ship {
+class Ship : public Entity {
 public:
     void update();
     void draw();
     void applyThrust();
     void shoot();
-
-    Vector2D position;
-    Vector2D velocity;
-    float rotation; // в градусах
-    float thrustPower;
 
     bool isBoosting;
     unsigned long lastShotTime;

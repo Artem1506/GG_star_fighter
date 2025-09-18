@@ -12,6 +12,11 @@ enum GameState {
 };
 
 class GameManager {
+private:
+	GameState currentState = STATE_LOGO;
+	int score = 0;
+	int highScore = 0;
+	unsigned long stateStartTime = 0;
 public:
 	void init();
 	void update();
