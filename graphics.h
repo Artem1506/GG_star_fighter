@@ -2,10 +2,21 @@
 #define GRAPHICS_H
 
 #include <Arduino.h>
+#include "storage.h"
 
 // ==================== Константы экрана ====================
 constexpr int16_t SCREEN_WIDTH = 128;
 constexpr int16_t SCREEN_HEIGHT = 160;
+
+// ==================== КОНСТАНТЫ ПУТЕЙ ФАЙЛОВ ====================
+// ВСЕ ФАЙЛЫ В КОРНЕ SD-КАРТЫ
+constexpr const char* LOGO_FILE = "/spr_GG_logo.bin";
+constexpr const char* START_BG_FILE = "/spr_start_BG.bin";
+constexpr const char* MAIN_BG_FILE = "/spr_main_BG.bin";
+constexpr const char* GAMEOVER_BG_FILE = "/spr_GO_BG.bin";
+constexpr const char* NAME1_FILE = "/spr_main_name.bin";
+constexpr const char* NAME2_FILE = "/spr_main_name2.bin";
+constexpr const char* PRESS_FILE = "/spr_press_RB.bin";
 
 // ==================== Константы размеров спрайтов ====================
 constexpr uint8_t SHIP_WIDTH = 17;
@@ -30,75 +41,52 @@ constexpr uint8_t PRESS_HEIGHT = 15;
 constexpr uint8_t MAIN_BG_WIDTH = 128;
 constexpr uint8_t MAIN_BG_HEIGHT = 160;
 
-// ==================== Упрощенные структуры ====================
-struct Entity {
-    int16_t x, y;
-    int8_t vx, vy;
-    bool active;
+// ==================== КОНСТАНТЫ КЭШИРОВАНИЯ ====================
+constexpr uint8_t MAX_CACHED_SPRITES = 15;
+constexpr uint8_t MAX_FILENAME_LENGTH = 24;
+
+// ==================== СТРУКТУРА КЭША ====================
+struct CachedSprite {
+    char filename[MAX_FILENAME_LENGTH];
+    uint8_t* data;
+    uint8_t width;
+    uint8_t height;
+    uint8_t bpp;
+    uint32_t lastUsed;
 };
 
-// ==================== Основной класс Graphics ====================
+// ==================== ОСНОВНОЙ КЛАСС ====================
 class Graphics {
 public:
     bool init();
-    void drawSprite(int16_t x, int16_t y, const uint8_t* bitmap, uint8_t w, uint8_t h, uint8_t bpp = 1);
-    void clear();
     void present();
+    void clear();
 
-    // Основные функции отрисовки
+    // Основные экраны согласно ТЗ
     void drawLogo();
     void drawStartMenu(uint8_t frame);
     void drawGameBackground();
-    void drawScore(uint16_t score);
     void drawGameOver(uint16_t score, uint16_t highScore);
 
-    // Оптимизированные функции для игровых объектов
+    // Игровые объекты согласно ТЗ
     void drawShip(int16_t x, int16_t y, uint16_t angle, bool isBoosting = false, uint8_t boostFrame = 0);
     void drawBullet(int16_t x, int16_t y, uint16_t angle);
     void drawAsteroid(int16_t x, int16_t y, uint8_t size);
     void drawComet(int16_t x, int16_t y, uint16_t direction);
     void drawExplosion(int16_t x, int16_t y, uint8_t frame);
+    void drawScore(uint16_t score);
 
-    // Утилиты для центрирования
+    // Утилиты
     static int16_t centerX(int16_t x, uint8_t width) { return x - width / 2; }
     static int16_t centerY(int16_t y, uint8_t height) { return y - height / 2; }
 
 private:
-    // Быстрая загрузка спрайтов
+    StorageManager storage;
+    void drawSprite(int16_t x, int16_t y, const uint8_t* bitmap, uint8_t w, uint8_t h, uint8_t bpp = 1);
     const uint8_t* loadSprite(const char* filename);
-
-    // Вспомогательные функции
+    void preloadEssentialSprites();
+    void cleanupSpriteCache();
     bool isSpriteVisible(int16_t x, int16_t y, uint8_t w, uint8_t h);
-    void drawPixel(int16_t x, int16_t y, uint8_t color);
-};
-
-// ==================== Упрощенная система анимаций ====================
-class Animation {
-public:
-    void start(int16_t x, int16_t y, uint8_t type);
-    void update();
-    void draw();
-    bool isActive() const { return active; }
-
-private:
-    int16_t x, y;
-    uint8_t type;
-    uint8_t frame;
-    uint32_t startTime;
-    bool active;
-};
-
-// ==================== Простой менеджер анимаций ====================
-class AnimationManager {
-public:
-    void update();
-    void draw();
-    void createExplosion(int16_t x, int16_t y);
-
-private:
-    static const uint8_t MAX_ANIMATIONS = 5;
-    Animation animations[MAX_ANIMATIONS];
-    uint8_t animationCount = 0;
 };
 
 #endif

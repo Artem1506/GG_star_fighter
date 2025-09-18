@@ -2,20 +2,20 @@
 #define STORAGE_H
 
 #include <Arduino.h>
+#include <SD_MMC.h>
 
-// ==================== Интерфейс ====================
-bool storageInit();
-
-unsigned long loadHighscore();
-void saveHighscore(unsigned long score);
-
+// ==================== ЕДИНЫЙ ИНТЕРФЕЙС ====================
 class StorageManager {
 public:
-	bool initSD();
-	int readHighScore();
-	void writeHighScore(int score);
-	File openSprite(const char* filename);
-	File openAudio(const char* filename);
+    bool init(); // Единая инициализация
+    int readHighScore();
+    void writeHighScore(int score);
+
+    // Дополнительные функции доступа
+    File openFile(const char* filename, const char* mode = FILE_READ);
+
+private:
+    static const char* HIGHSCORE_FILE;
 };
 
 #endif

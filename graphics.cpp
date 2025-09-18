@@ -2,43 +2,22 @@
 #include <SD_MMC.h>
 #include <TFT_eSPI.h>
 
-// ==================== Глобальные переменные ====================
+// ==================== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ====================
 static TFT_eSPI* tft = nullptr;
 static CachedSprite spriteCache[MAX_CACHED_SPRITES];
 static uint8_t spriteCacheCount = 0;
 
-// ==================== Инициализация ====================
+// ==================== ИНИЦИАЛИЗАЦИЯ ====================
 bool Graphics::init() {
-    // Инициализация дисплея
     tft = new TFT_eSPI();
     tft->init();
     tft->setRotation(0);
     tft->fillScreen(TFT_BLACK);
 
-    // Инициализация SD_MMC
-    if (!SD_MMC.begin("/sdcard", true)) { // 1-bit режим для экономии пинов
-        Serial.println("SD_MMC initialization failed!");
+    // ЕДИНАЯ ИНИЦИАЛИЗАЦИЯ SD ЧЕРЕЗ StorageManager
+    if (!storage.init()) {
+        Serial.println("Storage initialization failed!");
         return false;
-    }
-
-    uint8_t cardType = SD_MMC.cardType();
-    if (cardType == CARD_NONE) {
-        Serial.println("No SD card attached");
-        return false;
-    }
-
-    Serial.print("SD_MMC Card Type: ");
-    if (cardType == CARD_MMC) {
-        Serial.println("MMC");
-    }
-    else if (cardType == CARD_SD) {
-        Serial.println("SDSC");
-    }
-    else if (cardType == CARD_SDHC) {
-        Serial.println("SDHC");
-    }
-    else {
-        Serial.println("UNKNOWN");
     }
 
     // Предзагрузка критичных спрайтов
@@ -47,23 +26,32 @@ bool Graphics::init() {
     return true;
 }
 
-// ==================== Предзагрузка важных спрайтов ====================
+void Graphics::present() {
+}
+
+void Graphics::clear() {
+    tft->fillScreen(TFT_BLACK);
+}
+
+// ==================== ПРЕДЗАГРУЗКА СПРАЙТОВ ====================
 void Graphics::preloadEssentialSprites() {
+    // ВСЕ ФАЙЛЫ В КОРНЕ SD-КАРТЫ
     const char* essentialSprites[] = {
-        "/sprites/logo.bin",
-        "/sprites/bg_menu.bin",
-        "/sprites/bg_game.bin",
-        "/sprites/bg_gameover.bin",
-        "/sprites/ship/s_000.bin",
-        "/sprites/ship/b_000_1.bin"
+        LOGO_FILE,
+        START_BG_FILE,
+        MAIN_BG_FILE,
+        GAMEOVER_BG_FILE,
+        NAME1_FILE,
+        NAME2_FILE,
+        PRESS_FILE
     };
 
-    for (const char* filename : essentialSprites) {
-        loadSprite(filename);
+    for (uint8_t i = 0; i < sizeof(essentialSprites) / sizeof(essentialSprites[0]); i++) {
+        loadSprite(essentialSprites[i]);
     }
 }
 
-// ==================== Оптимизированная загрузка спрайтов ====================
+// ==================== ЗАГРУЗКА СПРАЙТОВ ====================
 const uint8_t* Graphics::loadSprite(const char* filename) {
     // Поиск в кэше
     for (uint8_t i = 0; i < spriteCacheCount; i++) {
@@ -73,67 +61,58 @@ const uint8_t* Graphics::loadSprite(const char* filename) {
         }
     }
 
-    // Освобождение места в кэше если нужно
+    // Освобождение места если нужно
     if (spriteCacheCount >= MAX_CACHED_SPRITES) {
         cleanupSpriteCache();
     }
 
-    // Открытие файла через SD_MMC
-    File file = SD_MMC.open(filename, FILE_READ);
+    // Загрузка с SD (все файлы в корне)
+    File file = storage.openFile(filename, FILE_READ);
     if (!file) {
         Serial.print("Failed to open: ");
         Serial.println(filename);
         return nullptr;
     }
 
-    // Автоопределение параметров спрайта
+    // Автоопределение параметров
     uint8_t width = 0, height = 0, bpp = 4;
 
     if (strstr(filename, "ship")) {
         width = SHIP_WIDTH; height = SHIP_HEIGHT;
-        if (strstr(filename, "boost")) bpp = 4; else bpp = 4;
     }
     else if (strstr(filename, "bullet")) {
         width = BULLET_WIDTH; height = BULLET_HEIGHT; bpp = 1;
     }
     else if (strstr(filename, "comet")) {
-        width = COMET_WIDTH; height = COMET_HEIGHT; bpp = 4;
+        width = COMET_WIDTH; height = COMET_HEIGHT;
     }
     else if (strstr(filename, "explosion")) {
-        width = EXPLOSION_WIDTH; height = EXPLOSION_HEIGHT; bpp = 4;
+        width = EXPLOSION_WIDTH; height = EXPLOSION_HEIGHT;
     }
     else if (strstr(filename, "asteroid")) {
-        width = ASTEROID_WIDTH; height = ASTEROID_HEIGHT; bpp = 4;
+        width = ASTEROID_WIDTH; height = ASTEROID_HEIGHT;
     }
-    else if (strstr(filename, "logo")) {
-        width = LOGO_WIDTH; height = LOGO_HEIGHT; bpp = 4;
+    else if (strstr(filename, "spr_GG_logo")) {
+        width = LOGO_WIDTH; height = LOGO_HEIGHT;
     }
-    else if (strstr(filename, "BG")) {
-        width = BG_WIDTH; height = BG_HEIGHT; bpp = 4;
+    else if (strstr(filename, "spr_start_BG") || strstr(filename, "spr_main_BG") || strstr(filename, "spr_GO_BG")) {
+        width = BG_WIDTH; height = BG_HEIGHT;
     }
-
-    size_t expectedSize = (width * height * bpp) / 8;
-    if (file.size() != expectedSize) {
-        Serial.print("Size mismatch: ");
-        Serial.println(filename);
-        file.close();
-        return nullptr;
+    else if (strstr(filename, "spr_main_name")) {
+        width = NAME_WIDTH; height = NAME_HEIGHT;
+    }
+    else if (strstr(filename, "spr_press_RB")) {
+        width = PRESS_WIDTH; height = PRESS_HEIGHT;
     }
 
-    // Чтение данных
-    uint8_t* data = new uint8_t[expectedSize];
-    if (file.read(data, expectedSize) != expectedSize) {
-        Serial.print("Read error: ");
-        Serial.println(filename);
-        delete[] data;
-        file.close();
-        return nullptr;
-    }
+    size_t size = file.size();
+    uint8_t* data = new uint8_t[size];
+    file.read(data, size);
     file.close();
 
     // Сохранение в кэш
     if (spriteCacheCount < MAX_CACHED_SPRITES) {
-        strncpy(spriteCache[spriteCacheCount].filename, filename, MAX_FILENAME_LENGTH);
+        strncpy(spriteCache[spriteCacheCount].filename, filename, MAX_FILENAME_LENGTH - 1);
         spriteCache[spriteCacheCount].data = data;
         spriteCache[spriteCacheCount].width = width;
         spriteCache[spriteCacheCount].height = height;
@@ -145,12 +124,11 @@ const uint8_t* Graphics::loadSprite(const char* filename) {
     return data;
 }
 
-// ==================== Очистка кэша ====================
+// ==================== ОЧИСТКА КЭША ====================
 void Graphics::cleanupSpriteCache() {
     uint32_t oldestTime = UINT32_MAX;
     uint8_t oldestIndex = 0;
 
-    // Поиск самого старого спрайта
     for (uint8_t i = 0; i < spriteCacheCount; i++) {
         if (spriteCache[i].lastUsed < oldestTime) {
             oldestTime = spriteCache[i].lastUsed;
@@ -158,10 +136,8 @@ void Graphics::cleanupSpriteCache() {
         }
     }
 
-    // Освобождение памяти
     delete[] spriteCache[oldestIndex].data;
 
-    // Сдвиг массива
     for (uint8_t i = oldestIndex; i < spriteCacheCount - 1; i++) {
         spriteCache[i] = spriteCache[i + 1];
     }
@@ -169,16 +145,16 @@ void Graphics::cleanupSpriteCache() {
     spriteCacheCount--;
 }
 
-// ==================== Отрисовка игровых объектов ====================
+// ==================== ОТРИСОВКА ИГРОВЫХ ОБЪЕКТОВ ====================
 void Graphics::drawShip(int16_t x, int16_t y, uint16_t angle, bool isBoosting, uint8_t boostFrame) {
+    char filename[28]; // Укороченные имена для корня
     uint16_t normalizedAngle = (angle / 10) * 10;
-    char filename[32];
 
     if (isBoosting) {
-        snprintf(filename, sizeof(filename), "/sprites/ship/boost_%03d_%d.bin", normalizedAngle, boostFrame + 1);
+        snprintf(filename, sizeof(filename), "/spr_ship_boost_%03d_%d.bin", normalizedAngle, boostFrame + 1);
     }
     else {
-        snprintf(filename, sizeof(filename), "/sprites/ship/stay_%03d.bin", normalizedAngle);
+        snprintf(filename, sizeof(filename), "/spr_ship_stay_%03d.bin", normalizedAngle);
     }
 
     const uint8_t* sprite = loadSprite(filename);
@@ -188,9 +164,9 @@ void Graphics::drawShip(int16_t x, int16_t y, uint16_t angle, bool isBoosting, u
 }
 
 void Graphics::drawBullet(int16_t x, int16_t y, uint16_t angle) {
+    char filename[24];
     uint16_t normalizedAngle = (angle / 10) * 10;
-    char filename[32];
-    snprintf(filename, sizeof(filename), "/sprites/bullet/%03d.bin", normalizedAngle);
+    snprintf(filename, sizeof(filename), "/spr_bullet_%03d.bin", normalizedAngle);
 
     const uint8_t* sprite = loadSprite(filename);
     if (sprite) {
@@ -199,9 +175,9 @@ void Graphics::drawBullet(int16_t x, int16_t y, uint16_t angle) {
 }
 
 void Graphics::drawComet(int16_t x, int16_t y, uint16_t direction) {
+    char filename[24];
     uint16_t normalizedDirection = (direction / 10) * 10;
-    char filename[32];
-    snprintf(filename, sizeof(filename), "/sprites/comet/%03d.bin", normalizedDirection);
+    snprintf(filename, sizeof(filename), "/spr_comet_%03d.bin", normalizedDirection);
 
     const uint8_t* sprite = loadSprite(filename);
     if (sprite) {
@@ -209,9 +185,29 @@ void Graphics::drawComet(int16_t x, int16_t y, uint16_t direction) {
     }
 }
 
-// ==================== Основные экраны ====================
+void Graphics::drawExplosion(int16_t x, int16_t y, uint8_t frame) {
+    char filename[24];
+    snprintf(filename, sizeof(filename), "/spr_explosion_%02d.bin", frame);
+
+    const uint8_t* sprite = loadSprite(filename);
+    if (sprite) {
+        drawSprite(centerX(x, EXPLOSION_WIDTH), centerY(y, EXPLOSION_HEIGHT), sprite, EXPLOSION_WIDTH, EXPLOSION_HEIGHT, 4);
+    }
+}
+
+void Graphics::drawAsteroid(int16_t x, int16_t y, uint8_t size) {
+    char filename[24];
+    snprintf(filename, sizeof(filename), "/spr_asteroid_%d.bin", size);
+
+    const uint8_t* sprite = loadSprite(filename);
+    if (sprite) {
+        drawSprite(centerX(x, ASTEROID_WIDTH), centerY(y, ASTEROID_HEIGHT), sprite, ASTEROID_WIDTH, ASTEROID_HEIGHT, 4);
+    }
+}
+
+// ==================== ОСНОВНЫЕ ЭКРАНЫ ====================
 void Graphics::drawLogo() {
-    const uint8_t* sprite = loadSprite("/sprites/logo.bin");
+    const uint8_t* sprite = loadSprite(LOGO_FILE);
     if (sprite) {
         drawSprite(0, 0, sprite, LOGO_WIDTH, LOGO_HEIGHT, 4);
     }
@@ -219,36 +215,35 @@ void Graphics::drawLogo() {
 
 void Graphics::drawStartMenu(uint8_t frame) {
     // Фон
-    const uint8_t* bg = loadSprite("/sprites/bg_menu.bin");
-    if (bg) {
-        drawSprite(0, 0, bg, BG_WIDTH, BG_HEIGHT, 4);
-    }
+    const uint8_t* bg = loadSprite(START_BG_FILE);
+    if (bg) drawSprite(0, 0, bg, BG_WIDTH, BG_HEIGHT, 4);
 
-    // Анимированные элементы
-    if (frame % 20 < 10) {
-        const uint8_t* name1 = loadSprite("/sprites/name1.bin");
+    // Анимация названия (1 секунда)
+    if ((frame / 60) % 2 == 0) {
+        const uint8_t* name1 = loadSprite(NAME1_FILE);
         if (name1) drawSprite(5, 20, name1, NAME_WIDTH, NAME_HEIGHT, 4);
     }
     else {
-        const uint8_t* name2 = loadSprite("/sprites/name2.bin");
+        const uint8_t* name2 = loadSprite(NAME2_FILE);
         if (name2) drawSprite(5, 20, name2, NAME_WIDTH, NAME_HEIGHT, 4);
     }
 
-    if (frame % 10 < 5) {
-        const uint8_t* press = loadSprite("/sprites/press.bin");
+    // Мигающая надпись (0.5 секунды)
+    if ((frame / 30) % 2 == 0) {
+        const uint8_t* press = loadSprite(PRESS_FILE);
         if (press) drawSprite(40, 120, press, PRESS_WIDTH, PRESS_HEIGHT, 4);
     }
 }
 
 void Graphics::drawGameBackground() {
-    const uint8_t* bg = loadSprite("/sprites/bg_game.bin");
+    const uint8_t* bg = loadSprite(MAIN_BG_FILE);
     if (bg) {
-        drawSprite(0, 0, bg, MAIN_BG_WIDTH, MAIN_BG_HEIGHT, 4);
+        drawSprite(0, 0, bg, BG_WIDTH, BG_HEIGHT, 4);
     }
 }
 
 void Graphics::drawGameOver(uint16_t score, uint16_t highScore) {
-    const uint8_t* bg = loadSprite("/sprites/bg_gameover.bin");
+    const uint8_t* bg = loadSprite(GAMEOVER_BG_FILE);
     if (bg) {
         drawSprite(0, 0, bg, BG_WIDTH, BG_HEIGHT, 4);
     }
@@ -263,13 +258,11 @@ void Graphics::drawGameOver(uint16_t score, uint16_t highScore) {
     tft->drawString(highScoreText, SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 20, 2);
 }
 
-// ==================== Утилиты ====================
+// ==================== УТИЛИТЫ ====================
 void Graphics::drawScore(uint16_t score) {
-    char scoreText[15];
+    char scoreText[16];
     snprintf(scoreText, sizeof(scoreText), "SCORE: %d", score);
-
     tft->setTextColor(TFT_WHITE, TFT_BLACK);
-    tft->setTextDatum(TL_DATUM);
     tft->drawString(scoreText, 5, 5, 2);
 }
 

@@ -1,4 +1,6 @@
 #include <Arduino.h>
+#include <TFT_eSPI.h>
+#include <SD_MMC.h>
 
 // ===== Подключаем модули =====
 #include "graphics.h"
@@ -8,47 +10,39 @@
 #include "storage.h"
 #include "entities.h"
 
-#include <TFT_eSPI.h>
-TFT_eSPI tft = TFT_eSPI();   // создаём глобальный дисплей
-
-GameManager game;
-StorageManager storage;
-AudioManager audio;
-StateMachine stateMachine;
-StorageManager storage;
-CollisionSystem collisionSystem;
+// ===== Глобальные объекты =====
+TFT_eSPI tft;                   // Дисплей
+Graphics graphics;              // Графика
+InputManager input;             // Ввод
+AudioManager audio;             // Аудио
+GameManager game;               // Игра
+StorageManager storage;         // Хранилище
 
 void setup() {
     Serial.begin(115200);
-
     // === Инициализация подсистем ===
-    display.init();
+    graphics.init();
     input.init();
-    storage.initSD();
+    storage.init();
     audio.init();
-  
-    stateMachine.changeState(new LogoState());
+    initEntities();
     
-    game.changeState(STATE_LOGO);
+    game.init();
 }
 
 void loop() {
     uint32_t frameStart = millis();
     
-    // 1. Ввод (максимально быстро)
-    readInputs();
+    input.update();
+    InputState inputState = input.getState();
+    game.update();
+    audio.update();
     
-    // 2. Обновление игры
-    updateGame();
-    
-    // 3. Отрисовка
     graphics.clear();
-    drawGame();
+    game.render();
     graphics.present();
     
-    // 4. Точный контроль FPS (60 FPS = 16.67ms на кадр)
+    // Контроль FPS
     uint32_t frameTime = millis() - frameStart;
-    if (frameTime < 16) {
-        delay(16 - frameTime);
-    }
+    if (frameTime < 16) delay(16 - frameTime);
 }

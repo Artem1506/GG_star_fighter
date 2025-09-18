@@ -3,28 +3,55 @@
 
 #include <Arduino.h>
 
-// ==================== Пины ====================
-#define ENCODER_CLK 32
-#define ENCODER_DT  33
-#define ENCODER_SW  14
-#define BUTTON_A    2
-#define BUTTON_B    19
+// ==================== КОНСТАНТЫ ПИНОВ ====================
+constexpr uint8_t ENCODER_CLK = 32;
+constexpr uint8_t ENCODER_DT = 33;
+constexpr uint8_t ENCODER_SW = 14;
+constexpr uint8_t BUTTON_A = 2;
+constexpr uint8_t BUTTON_B = 19;
 
-// ==================== Структура ввода ====================
+// ==================== СТРУКТУРА СОСТОЯНИЯ ВВОДА ====================
 struct InputState {
-    int encoderAngle;     // угол (в градусах, кратный 10)
-    bool encoderPressed;  // нажата ли кнопка энкодера (одноразовое событие)
-    bool buttonA;         // кнопка движения
-    bool buttonB;         // кнопка стрельбы
+    int16_t encoderAngle;     // угол (в градусах, кратный 10)
+    bool encoderPressed;      // нажата ли кнопка энкодера
+    bool buttonA;             // кнопка движения
+    bool buttonB;             // кнопка стрельбы
 };
 
-// ==================== Инициализация ====================
-void inputInit();
+// ==================== КЛАСС УПРАВЛЕНИЯ ВВОДОМ ====================
+class InputManager {
+public:
+    bool init();
+    void update();
+    InputState getState() const;
 
-// ==================== Обновление ====================
-void updateInput();
+private:
+    static void handleEncoderISR();
 
-// ==================== Получение состояния ====================
-InputState getInput();
+    // Состояние ввода
+    InputState currentState;
+
+    // Переменные для энкодера
+    static volatile int32_t encoderPos;
+    static volatile int lastEncoderARaw;
+
+    // Переменные для дебаунса
+    static bool encoderSwRaw;
+    static bool encoderSwStable;
+    static bool lastEncoderSwStable;
+    static unsigned long encoderSwLastDebounce;
+
+    static bool btnARaw;
+    static bool btnAStable;
+    static bool lastBtnAStable;
+    static unsigned long btnALastDebounce;
+
+    static bool btnBRaw;
+    static bool btnBStable;
+    static bool lastBtnBStable;
+    static unsigned long btnBLastDebounce;
+
+    static bool encoderPressed;
+};
 
 #endif

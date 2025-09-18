@@ -1,47 +1,37 @@
 #include "input.h"
-#include <Arduino.h>
-#include <driver/gpio.h> // для gpio_get_level в ISR (ESP32)
+#include <driver/gpio.h>
 
-// ========== Настройки debounce ==========
-static const unsigned long DEBOUNCE_MS = 50; // задержка стабильности (можно уменьшить/увеличить)
+// ==================== СТАТИЧЕСКИЕ ПЕРЕМЕННЫЕ ====================
+volatile int32_t InputManager::encoderPos = 0;
+volatile int InputManager::lastEncoderARaw = 0;
 
-// ========== Глобальные переменные ==========
-volatile int encoderPos = 0;    // "сырое" значение энкодера (из ISR)
-int encoderAngle = 0;          // угол в градусах
-// Для ISR: предыдущее сырое состояние A
-volatile int lastEncoderARaw = 0;
+bool InputManager::encoderSwRaw = false;
+bool InputManager::encoderSwStable = false;
+bool InputManager::lastEncoderSwStable = false;
+unsigned long InputManager::encoderSwLastDebounce = 0;
 
-// encoder switch (SW) — raw + debounce
-static bool encoderSwRaw = false;
-static bool encoderSwStable = false;
-static bool lastEncoderSwStable = false;
-static unsigned long encoderSwLastDebounce = 0;
+bool InputManager::btnARaw = false;
+bool InputManager::btnAStable = false;
+bool InputManager::lastBtnAStable = false;
+unsigned long InputManager::btnALastDebounce = 0;
 
-// кнопка A
-static bool btnARaw = false;
-static bool btnAStable = false;
-static bool lastBtnAStable = false;
-static unsigned long btnALastDebounce = 0;
+bool InputManager::btnBRaw = false;
+bool InputManager::btnBStable = false;
+bool InputManager::lastBtnBStable = false;
+unsigned long InputManager::btnBLastDebounce = 0;
 
-// кнопка B
-static bool btnBRaw = false;
-static bool btnBStable = false;
-static bool lastBtnBStable = false;
-static unsigned long btnBLastDebounce = 0;
+bool InputManager::encoderPressed = false;
 
-// одноразовое событие "нажатие энкодера"
-static bool encoderPressed = false;
+constexpr unsigned long DEBOUNCE_MS = 50;
 
-// ========== Обработчик прерываний для энкодера ==========
-void IRAM_ATTR handleEncoder() {
-    // Быстрый безопасный считыватель состояния GPIO в ISR
+// ==================== ОБРАБОТЧИК ПРЕРЫВАНИЙ ====================
+void IRAM_ATTR InputManager::handleEncoderISR() {
     int A = gpio_get_level((gpio_num_t)ENCODER_CLK);
     int B = gpio_get_level((gpio_num_t)ENCODER_DT);
 
-    // Срабатываем только по изменению A (одна из распространённых схем чтения энкодера)
     if (A != lastEncoderARaw) {
         if (A == B) {
-            encoderPos++;   // направление зависит от фаз
+            encoderPos++;
         }
         else {
             encoderPos--;
@@ -50,111 +40,92 @@ void IRAM_ATTR handleEncoder() {
     lastEncoderARaw = A;
 }
 
-// ========== Инициализация ==========
-void inputInit() {
-    // Настроим пины как INPUT_PULLUP (схема: пин -> кнопка -> GND)
+// ==================== ИНИЦИАЛИЗАЦИЯ ====================
+bool InputManager::init() {
+    // Настройка пинов
     pinMode(ENCODER_CLK, INPUT_PULLUP);
     pinMode(ENCODER_DT, INPUT_PULLUP);
     pinMode(ENCODER_SW, INPUT_PULLUP);
-
     pinMode(BUTTON_A, INPUT_PULLUP);
     pinMode(BUTTON_B, INPUT_PULLUP);
 
-    // Инициализируем "сырые" и стабильные состояния по текущему уровню пинов
+    // Инициализация состояний
     lastEncoderARaw = gpio_get_level((gpio_num_t)ENCODER_CLK);
 
     encoderSwRaw = (digitalRead(ENCODER_SW) == LOW);
     encoderSwStable = encoderSwRaw;
     lastEncoderSwStable = encoderSwStable;
-    encoderSwLastDebounce = 0;
 
     btnARaw = (digitalRead(BUTTON_A) == LOW);
     btnAStable = btnARaw;
     lastBtnAStable = btnAStable;
-    btnALastDebounce = 0;
 
     btnBRaw = (digitalRead(BUTTON_B) == LOW);
     btnBStable = btnBRaw;
     lastBtnBStable = btnBStable;
-    btnBLastDebounce = 0;
 
-    // Прерывание только на CLK (A) — уменьшает ложные события
-    attachInterrupt(digitalPinToInterrupt(ENCODER_CLK), handleEncoder, CHANGE);
+    // Настройка прерывания
+    attachInterrupt(digitalPinToInterrupt(ENCODER_CLK), handleEncoderISR, CHANGE);
+
+    return true;
 }
 
-// ========== Обновление состояния (вызывайте в loop()) ==========
-void updateInput() {
-    // Сбрасываем одноразовое событие — оно выставится ниже если будет смена
+// ==================== ОБНОВЛЕНИЕ СОСТОЯНИЯ ====================
+void InputManager::update() {
+    // Сброс одноразового события
     encoderPressed = false;
 
-    // Обновляем вычисляемый угол (шаг 10 градусов)
-    encoderAngle = (encoderPos * 10) % 360;
-    if (encoderAngle < 0) encoderAngle += 360;
+    // Обновление угла энкодера
+    currentState.encoderAngle = (encoderPos * 10) % 360;
+    if (currentState.encoderAngle < 0) currentState.encoderAngle += 360;
 
     unsigned long now = millis();
 
-    // ---------- Encoder SW (debounce) ----------
-    bool swReading = (digitalRead(ENCODER_SW) == LOW); // LOW = нажата
+    // ---------- Дебаунс кнопки энкодера ----------
+    bool swReading = (digitalRead(ENCODER_SW) == LOW);
     if (swReading != encoderSwRaw) {
-        // изменилось "сырое" чтение — стартуем таймер стабилизации
         encoderSwRaw = swReading;
         encoderSwLastDebounce = now;
     }
-    else {
-        // если прошло достаточно времени и "сырое" отличается от стабильного — считаем смену состоявшейся
-        if ((now - encoderSwLastDebounce) > DEBOUNCE_MS && encoderSwRaw != encoderSwStable) {
+    else if ((now - encoderSwLastDebounce) > DEBOUNCE_MS) {
+        if (encoderSwRaw != encoderSwStable) {
             lastEncoderSwStable = encoderSwStable;
             encoderSwStable = encoderSwRaw;
 
-            if (encoderSwStable) {
-                Serial.println("Encoder SW: PRESSED");
-            }
-            else {
-                Serial.println("Encoder SW: RELEASED");
-            }
-
-            // одноразовое событие при переходе RELEASED -> PRESSED
+            // Одноразовое событие при нажатии
             if (encoderSwStable && !lastEncoderSwStable) {
                 encoderPressed = true;
             }
         }
     }
 
-    // ---------- Button A (debounce) ----------
+    // ---------- Дебаунс кнопки A ----------
     bool aReading = (digitalRead(BUTTON_A) == LOW);
     if (aReading != btnARaw) {
         btnARaw = aReading;
         btnALastDebounce = now;
     }
-    else {
-        if ((now - btnALastDebounce) > DEBOUNCE_MS && btnARaw != btnAStable) {
-            lastBtnAStable = btnAStable;
-            btnAStable = btnARaw;
-            if (btnAStable) Serial.println("Button A: PRESSED"); else Serial.println("Button A: RELEASED");
-        }
+    else if ((now - btnALastDebounce) > DEBOUNCE_MS) {
+        btnAStable = btnARaw;
     }
 
-    // ---------- Button B (debounce) ----------
+    // ---------- Дебаунс кнопки B ----------
     bool bReading = (digitalRead(BUTTON_B) == LOW);
     if (bReading != btnBRaw) {
         btnBRaw = bReading;
         btnBLastDebounce = now;
     }
-    else {
-        if ((now - btnBLastDebounce) > DEBOUNCE_MS && btnBRaw != btnBStable) {
-            lastBtnBStable = btnBStable;
-            btnBStable = btnBRaw;
-            if (btnBStable) Serial.println("Button B: PRESSED"); else Serial.println("Button B: RELEASED");
-        }
+    else if ((now - btnBLastDebounce) > DEBOUNCE_MS) {
+        btnBStable = btnBRaw;
     }
+
+    // Обновление текущего состояния
+    currentState.encoderPressed = encoderPressed;
+    currentState.buttonA = btnAStable;
+    currentState.buttonB = btnBStable;
 }
 
-// ========== Возврат состояния в game/другим модулям ==========
-InputState getInput() {
-    InputState st;
-    st.encoderAngle = encoderAngle;
-    st.encoderPressed = encoderPressed;   // одноразовое событие (true только в цикле, где произошло стабилизированное нажатие)
-    st.buttonA = btnAStable;
-    st.buttonB = btnBStable;
-    return st;
+// ==================== ПОЛУЧЕНИЕ СОСТОЯНИЯ ====================
+InputState InputManager::getState() const {
+    return currentState;
 }
