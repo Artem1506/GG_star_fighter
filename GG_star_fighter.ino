@@ -8,7 +8,7 @@
 // ==================== КОНСТАНТЫ ПИНОВ ====================
 constexpr uint8_t ENCODER_CLK = 32;
 constexpr uint8_t ENCODER_DT = 33;
-constexpr uint8_t ENCODER_SW = 14;
+constexpr uint8_t ENCODER_SW = 34;
 constexpr uint8_t BUTTON_A = 2;
 constexpr uint8_t BUTTON_B = 19;
 constexpr uint8_t I2S_BCK_PIN = 26;
@@ -128,11 +128,11 @@ volatile int lastEncoderARaw = 0;
 // ==================== ФУНКЦИИ SD-КАРТЫ ====================
 bool initSDCard() {
     if (!SD_MMC.begin("/sdcard", true)) {
-        Serial.println("SD Card Mount Failed");
+        //Serial.println("SD Card Mount Failed");
         return false;
     }
     if (SD_MMC.cardType() == CARD_NONE) {
-        Serial.println("No SD card attached");
+        //Serial.println("No SD card attached");
         return false;
     }
     return true;
@@ -171,10 +171,24 @@ void drawImageFromSD(const char* filename, int x, int y, int w, int h) {
         return;
     }
 
-    uint16_t buffer[w];
+    uint16_t buffer[256];
     for (int row = 0; row < h; row++) {
-        if (file.read((uint8_t*)buffer, w * 2) == w * 2) {
+        int bytesToRead = w * 2;
+        int bytesRead = 0;
+        uint8_t* bufPtr = (uint8_t*)buffer;
+
+        // читаем гарантированно всю строку
+        while (bytesRead < bytesToRead) {
+            int r = file.read(bufPtr + bytesRead, bytesToRead - bytesRead);
+            if (r <= 0) break;
+            bytesRead += r;
+        }
+
+        if (bytesRead == bytesToRead) {
             tft.pushImage(x, y + row, w, 1, buffer);
+        } else {
+            Serial.printf("File read error in %s at row %d\n", filename, row);
+            break;
         }
     }
     file.close();
@@ -344,26 +358,56 @@ void playSoundEffect(uint16_t frequency, uint32_t duration) {
 
 // ==================== ВВОД ДАННЫХ ====================
 void IRAM_ATTR handleEncoderISR() {
-    int A = gpio_get_level((gpio_num_t)ENCODER_CLK);
-    int B = gpio_get_level((gpio_num_t)ENCODER_DT);
-
-    if (A != lastEncoderARaw) {
-        if (A == B) {
+    int clkState = digitalRead(ENCODER_CLK);
+    int dtState = digitalRead(ENCODER_DT);
+    
+    if (clkState != lastEncoderARaw) {
+        if (clkState == dtState) {
             encoderPos++;
         } else {
             encoderPos--;
         }
     }
-    lastEncoderARaw = A;
+    lastEncoderARaw = clkState;
 }
 
 InputState getInputState() {
     InputState state;
+
+    // Угол из энкодера
     state.encoderAngle = (encoderPos * 10) % 360;
     if (state.encoderAngle < 0) state.encoderAngle += 360;
-    state.encoderPressed = (digitalRead(ENCODER_SW) == LOW);
+
+    // Чтение кнопок
+    int swState = digitalRead(ENCODER_SW);
+    int clkState = digitalRead(ENCODER_CLK);
+    int dtState = digitalRead(ENCODER_DT);
+
+    state.encoderPressed = (swState == LOW);
     state.buttonA = (digitalRead(BUTTON_A) == LOW);
     state.buttonB = (digitalRead(BUTTON_B) == LOW);
+
+    // --- Логирование в стиле тестового проекта ---
+    //Serial.printf("Pos: %5d | Angle: %3d° | SW: %d | CLK: %d | DT: %d\n", 
+    //              encoderPos, state.encoderAngle, state.encoderPressed, clkState, dtState);
+
+    static bool lastSW = false;
+    if (state.encoderPressed && !lastSW) {
+        Serial.println(">>> ЭНКОДЕР НАЖАТ!");
+    }
+    if (!state.encoderPressed && lastSW) {
+        Serial.println(">>> ЭНКОДЕР ОТПУЩЕН!");
+    }
+    lastSW = state.encoderPressed;
+
+    static bool lastA = false, lastB = false;
+    if (state.buttonA && !lastA) Serial.println(">>> КНОПКА A НАЖАТА!");
+    if (!state.buttonA && lastA) Serial.println(">>> КНОПКА A ОТПУЩЕНА!");
+    if (state.buttonB && !lastB) Serial.println(">>> КНОПКА B НАЖАТА!");
+    if (!state.buttonB && lastB) Serial.println(">>> КНОПКА B ОТПУЩЕНА!");
+    lastA = state.buttonA;
+    lastB = state.buttonB;
+
     return state;
 }
 
@@ -480,13 +524,17 @@ void setup() {
     
     pinMode(ENCODER_CLK, INPUT_PULLUP);
     pinMode(ENCODER_DT, INPUT_PULLUP);
-    pinMode(ENCODER_SW, INPUT_PULLUP);
+    pinMode(ENCODER_SW, INPUT);
     pinMode(BUTTON_A, INPUT_PULLUP);
     pinMode(BUTTON_B, INPUT_PULLUP);
     pinMode(LED_PIN, OUTPUT);
     pinMode(BUZZER_PIN, OUTPUT);
 
-    lastEncoderARaw = gpio_get_level((gpio_num_t)ENCODER_CLK);
+    Serial.printf("ENCODER_SW pin mode: %d\n", digitalRead(ENCODER_SW));
+    Serial.printf("ENCODER_CLK pin mode: %d\n", digitalRead(ENCODER_CLK));
+    Serial.printf("ENCODER_DT pin mode: %d\n", digitalRead(ENCODER_DT));
+
+    lastEncoderARaw = digitalRead((gpio_num_t)ENCODER_CLK);
     attachInterrupt(digitalPinToInterrupt(ENCODER_CLK), handleEncoderISR, CHANGE);
 
     if (!initSDCard()) {
