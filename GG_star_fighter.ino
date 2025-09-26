@@ -5,6 +5,7 @@
 #include <driver/i2s.h>
 #include <cmath>
 
+
 // ==================== КОНСТАНТЫ ПИНОВ ====================
 constexpr uint8_t ENCODER_CLK = 32;
 constexpr uint8_t ENCODER_DT = 33;
@@ -30,6 +31,15 @@ constexpr const char* GAMEOVER_BG_FILE = "/spr_GO_BG.bin";
 constexpr const char* NAME1_FILE = "/spr_main_name.bin";
 constexpr const char* NAME2_FILE = "/spr_main_name2.bin";
 constexpr const char* PRESS_FILE = "/spr_press_RB.bin";
+constexpr const char* ASTEROID_FILE = "/spr_asteroid_1.bin";
+constexpr const char* BOOM_BIG_FILE = "/spr_boom_big1.bin";
+constexpr const char* BOOM_SMALL_FILE = "/spr_boom_small1.bin";
+constexpr const char* BULLET_FILE = "/spr_bullet_000.bin";
+constexpr const char* COMET_FILE = "/spr_comet_000.bin";
+constexpr const char* GAMEOVER_TEXT_FILE = "/spr_GO_text.bin";
+constexpr const char* SHIP_BOOST_FILE = "/spr_ship_boost_000_1.bin";
+constexpr const char* SHIP_STAY_FILE = "/spr_ship_stay_000.bin";
+
 
 // ==================== КОНСТАНТЫ РАЗМЕРОВ СПРАЙТОВ ====================
 constexpr uint8_t SHIP_WIDTH = 17;
@@ -38,8 +48,8 @@ constexpr uint8_t BULLET_WIDTH = 4;
 constexpr uint8_t BULLET_HEIGHT = 4;
 constexpr uint8_t ASTEROID_WIDTH = 9;
 constexpr uint8_t ASTEROID_HEIGHT = 10;
-constexpr uint8_t COMET_WIDTH = 24;
-constexpr uint8_t COMET_HEIGHT = 12;
+constexpr uint8_t COMET_WIDTH = 22;
+constexpr uint8_t COMET_HEIGHT = 21;
 constexpr uint8_t LOGO_WIDTH = 128;
 constexpr uint8_t LOGO_HEIGHT = 160;
 constexpr uint8_t BG_WIDTH = 128;
@@ -48,6 +58,12 @@ constexpr uint8_t NAME_WIDTH = 117;
 constexpr uint8_t NAME_HEIGHT = 48;
 constexpr uint8_t PRESS_WIDTH = 48;
 constexpr uint8_t PRESS_HEIGHT = 15;
+constexpr uint8_t BOOMBIG_WIDTH = 65;
+constexpr uint8_t BOOMBIG_HEIGHT = 62;
+constexpr uint8_t BOOMSMALL_WIDTH = 24;
+constexpr uint8_t BOOMSMALL_HEIGHT = 23;
+constexpr uint8_t GOTEXT_WIDTH = 58;
+constexpr uint8_t GOTEXT_HEIGHT = 35;
 
 // ==================== КОНСТАНТЫ ИГРЫ ====================
 constexpr uint8_t MAX_BULLETS = 5;
@@ -125,6 +141,42 @@ uint8_t activeAsteroids = 0;
 volatile int32_t encoderPos = 0;
 volatile int lastEncoderARaw = 0;
 
+// ==================== Мониторинг ресурсов ====================
+unsigned long lastStatsTime = 0;
+unsigned long frameCount = 0;
+
+void printStats() {
+  // CPU
+  uint32_t cpuFreq = getCpuFrequencyMhz();
+
+  // RAM
+  uint32_t freeHeap = ESP.getFreeHeap();
+  uint32_t minFreeHeap = ESP.getMinFreeHeap();
+
+  // PSRAM
+  uint32_t freePsram = ESP.getFreePsram();
+  uint32_t psramSize = ESP.getPsramSize();
+
+  // FPS
+  static unsigned long lastFpsTime = millis();
+  static unsigned long lastFrameCount = 0;
+  unsigned long now = millis();
+  float fps = (frameCount - lastFrameCount) * 1000.0 / (now - lastFpsTime);
+  lastFrameCount = frameCount;
+  lastFpsTime = now;
+
+  Serial.println("=== System Stats ===");
+  Serial.printf("CPU: %u MHz\n", cpuFreq);
+  Serial.printf("Heap Free: %u bytes (Min: %u)\n", freeHeap, minFreeHeap);
+  Serial.printf("PSRAM: %u / %u bytes free\n", freePsram, psramSize);
+  Serial.printf("FPS: %.2f\n", fps);
+  Serial.println("====================");
+}
+
+// ==================== end ====================
+
+
+
 // ==================== ФУНКЦИИ SD-КАРТЫ ====================
 bool initSDCard() {
     if (!SD_MMC.begin("/sdcard", true)) {
@@ -165,6 +217,18 @@ void writeHighScore(int score) {
 
 // ==================== ФУНКЦИИ ОТРИСОВКИ ====================
 void drawImageFromSD(const char* filename, int x, int y, int w, int h) {
+    size_t sz;
+    uint8_t* cached = getSpriteFromCache(filename, sz);
+    if (cached) {
+        // Рисуем из PSRAM
+        const uint16_t* buffer = (const uint16_t*)cached;
+        for (int row = 0; row < h; row++) {
+            tft.pushImage(x, y + row, w, 1, buffer + row * w);
+        }
+        return;
+    }
+
+    // Если не нашли в кеше — читаем с SD
     File file = SD_MMC.open(filename);
     if (!file) {
         Serial.printf("Failed to open: %s\n", filename);
@@ -176,14 +240,11 @@ void drawImageFromSD(const char* filename, int x, int y, int w, int h) {
         int bytesToRead = w * 2;
         int bytesRead = 0;
         uint8_t* bufPtr = (uint8_t*)buffer;
-
-        // читаем гарантированно всю строку
         while (bytesRead < bytesToRead) {
             int r = file.read(bufPtr + bytesRead, bytesToRead - bytesRead);
             if (r <= 0) break;
             bytesRead += r;
         }
-
         if (bytesRead == bytesToRead) {
             tft.pushImage(x, y + row, w, 1, buffer);
         } else {
@@ -193,6 +254,7 @@ void drawImageFromSD(const char* filename, int x, int y, int w, int h) {
     }
     file.close();
 }
+
 
 void drawLogo() {
     drawImageFromSD(LOGO_FILE, 0, 0, LOGO_WIDTH, LOGO_HEIGHT);
@@ -513,6 +575,58 @@ void checkCollisions() {
     }
 }
 
+// ==================== КЭШ СПРАЙТОВ В PSRAM ====================
+struct SpriteData {
+  String name;
+  uint8_t* data;
+  size_t size;
+};
+
+std::vector<SpriteData> spriteCache;
+
+// Загружаем все спрайты в PSRAM
+// Загружаем все спрайты в PSRAM
+void loadAllSpritesToPSRAM() {
+  const char* files[] = {
+    LOGO_FILE, START_BG_FILE, MAIN_BG_FILE, GAMEOVER_BG_FILE, NAME1_FILE, NAME2_FILE, PRESS_FILE, ASTEROID_FILE, BOOM_BIG_FILE, 
+    BOOM_SMALL_FILE, BULLET_FILE, COMET_FILE, GAMEOVER_TEXT_FILE, SHIP_BOOST_FILE, SHIP_STAY_FILE };
+  size_t fileCount = sizeof(files) / sizeof(files[0]);
+
+  for (size_t i = 0; i < fileCount; i++) {
+    File f = SD_MMC.open(files[i], FILE_READ);
+    if (!f) {
+      Serial.printf("[ERR] Не найден файл %s\n", files[i]);
+      continue;
+    }
+    size_t sz = f.size();
+    uint8_t* buf = (uint8_t*)ps_malloc(sz);
+    if (!buf) {
+      Serial.printf("[ERR] Нет памяти для %s\n", files[i]);
+      f.close();
+      continue;
+    }
+    f.read(buf, sz);
+    f.close();
+
+    SpriteData s = {String(files[i]), buf, sz};
+    spriteCache.push_back(s);
+    Serial.printf("[OK] Загружен %s (%u байт)\n", files[i], sz);
+  }
+}
+
+
+// Поиск спрайта в кеше
+uint8_t* getSpriteFromCache(const char* filename, size_t& outSize) {
+  for (auto& s : spriteCache) {
+    if (s.name.equals(filename)) {
+      outSize = s.size;
+      return s.data;
+    }
+  }
+  return nullptr;
+}
+
+
 // ==================== ОСНОВНЫЕ ФУНКЦИИ ====================
 void setup() {
     Serial.begin(115200);
@@ -542,6 +656,10 @@ void setup() {
         while(1);
     }
 
+    Serial.println("[INFO] Загружаем спрайты в PSRAM...");
+    loadAllSpritesToPSRAM();
+    Serial.println("[INFO] Спрайты готовы!");
+
     highScore = readHighScore();
     changeState(STATE_LOGO);
 }
@@ -557,7 +675,7 @@ void loop() {
             case STATE_LOGO:
                 if (currentTime - stateStartTime >= LOGO_DISPLAY_TIME) {
                     changeState(STATE_MENU);
-                    playRandomTrack(introTracks, 3);
+                    //playRandomTrack(introTracks, 3);
                 }
                 drawLogo();
                 break;
@@ -565,7 +683,7 @@ void loop() {
             case STATE_MENU:
                 if (input.encoderPressed) {
                     changeState(STATE_PLAY);
-                    playRandomTrack(mainTracks, 5);
+                    //playRandomTrack(mainTracks, 5);
                 }
                 
                 drawMenuBackground();
@@ -694,8 +812,14 @@ void loop() {
                 break;
         }
         
-        lastFrameTime = currentTime;
-    }
-    
+        frameCount++;
+
+  // Каждые 5 секунд печатаем статистику
+  unsigned long now = millis();
+  if (now - lastStatsTime >= 5000) {
+    lastStatsTime = now;
+    printStats();
+  }
+    } 
     delay(1);
 }
