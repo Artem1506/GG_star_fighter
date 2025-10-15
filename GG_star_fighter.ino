@@ -31,8 +31,28 @@ constexpr const char* NAME2_FILE = "/spr_main_name2.bin";
 constexpr const char* PRESS_FILE = "/spr_press_RB.bin"; //поменять на рисование текста
 constexpr const char* MAIN_BG_FILE = "/spr_main_BG.bin";
 constexpr const char* SHIP_BOOST_FILE = "/spr_ship_boost_000_1.bin";
-constexpr const char* SHIP_STAY_FILE = "/spr_ship_stay_000.bin";
-constexpr const char* BULLET_FILE = "/spr_bullet_000.bin";
+constexpr const char* SHIP_STAY_FILES[36] = {
+  "/spr_ship_stay_000.bin", "/spr_ship_stay_010.bin", "/spr_ship_stay_020.bin", "/spr_ship_stay_030.bin", 
+  "/spr_ship_stay_040.bin", "/spr_ship_stay_050.bin", "/spr_ship_stay_060.bin", "/spr_ship_stay_070.bin", 
+  "/spr_ship_stay_080.bin", "/spr_ship_stay_090.bin", "/spr_ship_stay_100.bin", "/spr_ship_stay_110.bin",
+  "/spr_ship_stay_120.bin", "/spr_ship_stay_130.bin", "/spr_ship_stay_140.bin", "/spr_ship_stay_150.bin", 
+  "/spr_ship_stay_160.bin", "/spr_ship_stay_170.bin", "/spr_ship_stay_180.bin", "/spr_ship_stay_190.bin", 
+  "/spr_ship_stay_200.bin", "/spr_ship_stay_210.bin", "/spr_ship_stay_220.bin", "/spr_ship_stay_230.bin",
+  "/spr_ship_stay_240.bin", "/spr_ship_stay_250.bin", "/spr_ship_stay_260.bin", "/spr_ship_stay_270.bin", 
+  "/spr_ship_stay_280.bin", "/spr_ship_stay_290.bin", "/spr_ship_stay_300.bin", "/spr_ship_stay_310.bin", 
+  "/spr_ship_stay_320.bin", "/spr_ship_stay_330.bin", "/spr_ship_stay_340.bin", "/spr_ship_stay_350.bin"
+};
+constexpr const char* BULLET_FILES[36] = {
+    "/spr_bullet_000.bin", "/spr_bullet_010.bin", "/spr_bullet_020.bin", "/spr_bullet_030.bin", 
+    "/spr_bullet_040.bin", "/spr_bullet_050.bin", "/spr_bullet_060.bin", "/spr_bullet_070.bin", 
+    "/spr_bullet_080.bin", "/spr_bullet_090.bin", "/spr_bullet_100.bin", "/spr_bullet_110.bin", 
+    "/spr_bullet_120.bin", "/spr_bullet_130.bin", "/spr_bullet_140.bin", "/spr_bullet_150.bin", 
+    "/spr_bullet_160.bin", "/spr_bullet_170.bin", "/spr_bullet_180.bin", "/spr_bullet_190.bin",
+    "/spr_bullet_200.bin", "/spr_bullet_210.bin", "/spr_bullet_220.bin", "/spr_bullet_230.bin", 
+    "/spr_bullet_240.bin", "/spr_bullet_250.bin", "/spr_bullet_260.bin", "/spr_bullet_270.bin", 
+    "/spr_bullet_280.bin", "/spr_bullet_290.bin", "/spr_bullet_300.bin", "/spr_bullet_310.bin", 
+    "/spr_bullet_320.bin", "/spr_bullet_330.bin", "/spr_bullet_340.bin", "/spr_bullet_350.bin"
+};
 constexpr const char* ASTEROID_FILE = "/spr_asteroid_1.bin";
 constexpr const char* COMET_FILE = "/spr_comet_000.bin";
 constexpr const char* BOOM_BIG_FILE = "/spr_boom_big1.bin";
@@ -68,18 +88,21 @@ constexpr uint8_t GOTEXT_HEIGHT = 35;
 constexpr uint8_t MAX_BULLETS = 5;
 constexpr uint8_t MAX_ASTEROIDS = 10;
 constexpr uint32_t BULLET_DELAY = 300;
-constexpr float SHIP_SPEED = 2.0f;
+constexpr float SHIP_SPEED = 1.0f;
 constexpr float BULLET_SPEED = 4.0f;
 constexpr float ASTEROID_BASE_SPEED = 1.0f;
 constexpr float COMET_SPEED_MULTIPLIER = 1.5f;
 constexpr uint32_t LOGO_DISPLAY_TIME = 2000;
 constexpr unsigned long DEBOUNCE_MS = 50;
 
+#define TRANSPARENT_COLOR 0xF81F
+
 // ==================== СТРУКТУРЫ И ПЕРЕЧИСЛЕНИЯ ====================
 struct Entity {
     float x, y;
     float vx, vy;
     bool active;
+    int oldX, oldY;
 };
 
 struct Ship {
@@ -140,6 +163,16 @@ uint8_t activeAsteroids = 0;
 volatile int32_t encoderPos = 0;
 volatile int lastEncoderARaw = 0;
 
+// ===== GLOBAL BACKGROUND DATA =====
+uint16_t* bgBuffer = nullptr;      // буфер текущего фона в PSRAM
+uint16_t* bgStart = nullptr;       // фон стартового меню
+uint16_t* bgMain = nullptr;        // фон основной игры
+uint16_t* bgGameOver = nullptr;    // фон экрана Game Over
+size_t bgSizeStart = 0;
+size_t bgSizeMain = 0;
+size_t bgSizeGameOver = 0;
+uint16_t* bgCurrent = nullptr;     // указатель на активный фон
+
 // ==================== Мониторинг ресурсов ====================
 unsigned long lastStatsTime = 0;
 unsigned long frameCount = 0;
@@ -174,7 +207,10 @@ void printStats() {
 
 // ==================== end ====================
 
-
+// Утилита: пересечение двух осевых bbox (x,y,w,h)
+bool rectsIntersect(int x1, int y1, int w1, int h1, int x2, int y2, int w2, int h2) {
+  return !(x2 >= x1 + w1 || x2 + w2 <= x1 || y2 >= y1 + h1 || y2 + h2 <= y1);
+}
 
 // ==================== ФУНКЦИИ SD-КАРТЫ ====================
 bool initSDCard() {
@@ -215,60 +251,149 @@ void writeHighScore(int score) {
 }
 
 // ==================== ФУНКЦИИ ОТРИСОВКИ ====================
-void drawImageFromSD(const char* filename, int x, int y, int w, int h) {
-    size_t sz;
-    uint8_t* cached = getSpriteFromCache(filename, sz);
-    if (cached) {
-        // Рисуем из PSRAM
-        const uint16_t* buffer = (const uint16_t*)cached;
-        for (int row = 0; row < h; row++) {
-            tft.pushImage(x, y + row, w, 1, buffer + row * w);
+void drawImageFromPSRAM(const char* filename, int x, int y, int w, int h) {
+    size_t size;
+    uint16_t* data = (uint16_t*)getSpriteFromCache(filename, size);
+    if (!data) return;
+
+    for (int j = 0; j < h; j++) {
+        for (int i = 0; i < w; i++) {
+            uint16_t color = data[j * w + i];  // берём цвет из спрайта
+            if (color != TRANSPARENT_COLOR) {
+                tft.drawPixel(x + i, y + j, color);
+            }
         }
-        return;
+    }
+}
+
+void restoreBgArea(int x, int y, int w, int h) {
+  uint16_t* src = bgBuffer + y * BG_WIDTH + x;
+  tft.pushImage(x, y, w, h, src);
+}
+// Вспомогательная функция: восстановить прямоугольник (x,y,w,h) из bgPtr
+void restoreBgAreaFromBG(uint16_t* bgPtr, int bgW, int bgH, int x, int y, int w, int h) {
+  if (!bgPtr) return;
+  // Клиппинг
+  if (x < 0) { w += x; x = 0; }
+  if (y < 0) { h += y; y = 0; }
+  if (x >= bgW || y >= bgH) return;
+  if (x + w > bgW) w = bgW - x;
+  if (y + h > bgH) h = bgH - y;
+  if (w <= 0 || h <= 0) return;
+
+  // Указатель на первый пиксель (x,y)
+  uint16_t* src = bgPtr + y * bgW + x;
+  // Отправляем весь прямоугольник одним pushImage
+  tft.pushImage(x, y, w, h, src);
+}
+
+// Главная функция: восстановить область и перерисовать объекты, пересекающиеся с ней
+// bgPtr/bgW/bgH - указатель и размеры текущего фонового изображения (например bgMain)
+void restoreAreaAndRedrawObjects(uint16_t* bgPtr, int bgW, int bgH,
+                                 int rx, int ry, int rw, int rh) {
+  if (!bgPtr) return;
+
+  // 1) Восстанавливаем фон в заданной зоне
+  restoreBgAreaFromBG(bgPtr, bgW, bgH, rx, ry, rw, rh);
+
+  // 2) Перерисуем все объекты, чьи current bbox пересекаются с этой зоной.
+  //    Порядок перерисовки отражает z-order: сначала астероиды, потом пули, затем корабль.
+  char nameBuf[64];
+
+  // ASTEROIDS
+  for (int i = 0; i < MAX_ASTEROIDS; i++) {
+    if (!asteroids[i].base.active) continue;
+    int ax = (int)asteroids[i].base.x - (ASTEROID_WIDTH / 2);
+    int ay = (int)asteroids[i].base.y - (ASTEROID_HEIGHT / 2);
+    int aw = asteroids[i].isComet ? COMET_WIDTH : ASTEROID_WIDTH;
+    int ah = asteroids[i].isComet ? COMET_HEIGHT : ASTEROID_HEIGHT;
+
+    if (rectsIntersect(rx, ry, rw, rh, ax, ay, aw, ah)) {
+      if (asteroids[i].isComet) {
+        float dirf = atan2(asteroids[i].base.vy, asteroids[i].base.vx) * 180.0f / PI;
+        int dir = (int)dirf;
+        if (dir < 0) dir += 360;
+        int norm = (dir / 10) * 10;
+        snprintf(nameBuf, sizeof(nameBuf), "/spr_comet_%03d.bin", norm);
+        drawImageFromPSRAM(nameBuf, ax, ay, COMET_WIDTH, COMET_HEIGHT);
+      } else {
+        drawImageFromPSRAM(ASTEROID_FILE, ax, ay, ASTEROID_WIDTH, ASTEROID_HEIGHT);
+      }
+    }
+  }
+
+  // BULLETS
+  for (int i = 0; i < MAX_BULLETS; i++) {
+    if (!bullets[i].base.active) continue;
+    int bx = (int)bullets[i].base.x - (BULLET_WIDTH / 2);
+    int by = (int)bullets[i].base.y - (BULLET_HEIGHT / 2);
+    if (rectsIntersect(rx, ry, rw, rh, bx, by, BULLET_WIDTH, BULLET_HEIGHT)) {
+      float angle = atan2(bullets[i].base.vy, bullets[i].base.vx) * 180.0f / PI;
+      int ang = (int)angle;
+      if (ang < 0) ang += 360;
+      int norm = (ang / 10) * 10;
+      snprintf(nameBuf, sizeof(nameBuf), "/spr_bullet_%03d.bin", norm);
+      drawImageFromPSRAM(nameBuf, bx, by, BULLET_WIDTH, BULLET_HEIGHT);
+    }
+  }
+
+  // PLAYER (на вершине)
+  if (playerShip.base.active) {
+    int sx = (int)playerShip.base.x - (SHIP_WIDTH / 2);
+    int sy = (int)playerShip.base.y - (SHIP_HEIGHT / 2);
+    if (rectsIntersect(rx, ry, rw, rh, sx, sy, SHIP_WIDTH, SHIP_HEIGHT)) {
+      int norm = (playerShip.rotation / 10) * 10;
+      if (playerShip.boosting) {
+        snprintf(nameBuf, sizeof(nameBuf), "/spr_ship_boost_%03d_%d.bin", norm, playerShip.boostFrame + 1);
+      } else {
+        snprintf(nameBuf, sizeof(nameBuf), "/spr_ship_stay_%03d.bin", norm);
+      }
+      drawImageFromPSRAM(nameBuf, sx, sy, SHIP_WIDTH, SHIP_HEIGHT);
+    }
+  }
+}
+
+void drawShipFromPSRAM(int16_t x, int16_t y, int16_t angle, bool boosting, uint8_t boostFrame) {
+    char filename[40];
+
+    // нормализация угла
+    int normAngle = angle % 360;
+    if (normAngle < 0) normAngle += 360;
+    normAngle = (normAngle / 10) * 10;
+
+    // имя файла
+    if (boosting) {
+        if (boostFrame > 2) boostFrame = 2;
+        snprintf(filename, sizeof(filename),
+                 "/spr_ship_boost_%03d_%d.bin", normAngle, boostFrame + 1);
+    } else {
+        snprintf(filename, sizeof(filename),
+                 "/spr_ship_stay_%03d.bin", normAngle);
     }
 
-    // Если не нашли в кеше — читаем с SD
-    File file = SD_MMC.open(filename);
-    if (!file) {
-        Serial.printf("Failed to open: %s\n", filename);
-        return;
-    }
+    size_t fileSize;
+    uint16_t* sprite = (uint16_t*)getSpriteFromCache(filename, fileSize);
+    if (!sprite) return;
 
-    uint16_t buffer[256];
-    for (int row = 0; row < h; row++) {
-        int bytesToRead = w * 2;
-        int bytesRead = 0;
-        uint8_t* bufPtr = (uint8_t*)buffer;
-        while (bytesRead < bytesToRead) {
-            int r = file.read(bufPtr + bytesRead, bytesToRead - bytesRead);
-            if (r <= 0) break;
-            bytesRead += r;
-        }
-        if (bytesRead == bytesToRead) {
-            tft.pushImage(x, y + row, w, 1, buffer);
-        } else {
-            Serial.printf("File read error in %s at row %d\n", filename, row);
-            break;
-        }
-    }
-    file.close();
+    // рисуем
+    tft.pushImage(x - SHIP_WIDTH/2, y - SHIP_HEIGHT/2, SHIP_WIDTH, SHIP_HEIGHT, sprite, TFT_MAGENTA);
 }
 
 
 void drawLogo() {
-    drawImageFromSD(LOGO_FILE, 0, 0, LOGO_WIDTH, LOGO_HEIGHT);
+    drawImageFromPSRAM(LOGO_FILE, 0, 0, LOGO_WIDTH, LOGO_HEIGHT);
 }
 
 void drawMenuBackground() {
-    drawImageFromSD(START_BG_FILE, 0, 0, BG_WIDTH, BG_HEIGHT);
+    drawImageFromPSRAM(START_BG_FILE, 0, 0, BG_WIDTH, BG_HEIGHT);
 }
 
 void drawGameBackground() {
-    drawImageFromSD(MAIN_BG_FILE, 0, 0, BG_WIDTH, BG_HEIGHT);
+    drawImageFromPSRAM(MAIN_BG_FILE, 0, 0, BG_WIDTH, BG_HEIGHT);
 }
 
 void drawGameOverBackground() {
-    drawImageFromSD(GAMEOVER_BG_FILE, 0, 0, BG_WIDTH, BG_HEIGHT);
+    drawImageFromPSRAM(GAMEOVER_BG_FILE, 0, 0, BG_WIDTH, BG_HEIGHT);
 }
 
 void drawShip(int16_t x, int16_t y, uint16_t angle, bool isBoosting = false, uint8_t boostFrame = 0) {
@@ -281,7 +406,7 @@ void drawShip(int16_t x, int16_t y, uint16_t angle, bool isBoosting = false, uin
         snprintf(filename, sizeof(filename), "/spr_ship_stay_%03d.bin", normalizedAngle);
     }
     
-    drawImageFromSD(filename, x - SHIP_WIDTH/2, y - SHIP_HEIGHT/2, SHIP_WIDTH, SHIP_HEIGHT);
+    drawImageFromPSRAM(filename, x - SHIP_WIDTH/2, y - SHIP_HEIGHT/2, SHIP_WIDTH, SHIP_HEIGHT);
 }
 
 void drawBullet(int16_t x, int16_t y, uint16_t angle) {
@@ -289,7 +414,7 @@ void drawBullet(int16_t x, int16_t y, uint16_t angle) {
     uint16_t normalizedAngle = (angle / 10) * 10;
     snprintf(filename, sizeof(filename), "/spr_bullet_%03d.bin", normalizedAngle);
     
-    drawImageFromSD(filename, x - BULLET_WIDTH/2, y - BULLET_HEIGHT/2, BULLET_WIDTH, BULLET_HEIGHT);
+    drawImageFromPSRAM(filename, x - BULLET_WIDTH/2, y - BULLET_HEIGHT/2, BULLET_WIDTH, BULLET_HEIGHT);
 }
 
 void drawAsteroid(int16_t x, int16_t y, uint8_t size, bool isComet, uint16_t direction) {
@@ -302,7 +427,7 @@ void drawAsteroid(int16_t x, int16_t y, uint8_t size, bool isComet, uint16_t dir
         snprintf(filename, sizeof(filename), "/spr_asteroid_1.bin", size);
     }
     
-    drawImageFromSD(filename, x - (isComet ? COMET_WIDTH : ASTEROID_WIDTH)/2, 
+    drawImageFromPSRAM(filename, x - (isComet ? COMET_WIDTH : ASTEROID_WIDTH)/2, 
                    y - (isComet ? COMET_HEIGHT : ASTEROID_HEIGHT)/2, 
                    isComet ? COMET_WIDTH : ASTEROID_WIDTH, 
                    isComet ? COMET_HEIGHT : ASTEROID_HEIGHT);
@@ -475,8 +600,13 @@ InputState getInputState() {
 // ==================== ИГРОВАЯ ЛОГИКА ====================
 void changeState(GameState newState) {
     currentState = newState;
-    stateStartTime = millis();
+    switch (newState) {
+        case STATE_MENU: bgCurrent = bgStart; break;
+        case STATE_PLAY: bgCurrent = bgMain; break;
+        case STATE_GAME_OVER: bgCurrent = bgGameOver; break;
+    }
 }
+
 
 void resetGame() {
     playerShip.base.x = SCREEN_WIDTH / 2;
@@ -584,12 +714,16 @@ struct SpriteData {
 std::vector<SpriteData> spriteCache;
 
 // Загружаем все спрайты в PSRAM
-// Загружаем все спрайты в PSRAM
 void loadAllSpritesToPSRAM() {
   const char* files[] = {
     LOGO_FILE, START_BG_FILE, MAIN_BG_FILE, GAMEOVER_BG_FILE, NAME1_FILE, NAME2_FILE, PRESS_FILE, ASTEROID_FILE, BOOM_BIG_FILE, 
-    BOOM_SMALL_FILE, BULLET_FILE, COMET_FILE, GAMEOVER_TEXT_FILE, SHIP_BOOST_FILE, SHIP_STAY_FILE };
+    BOOM_SMALL_FILE, COMET_FILE, GAMEOVER_TEXT_FILE, SHIP_BOOST_FILE };
   size_t fileCount = sizeof(files) / sizeof(files[0]);
+
+  for (int i = 0; i < 36; i++) {
+    loadFileToPSRAM(SHIP_STAY_FILES[i]);
+    loadFileToPSRAM(BULLET_FILES[i]);
+    }
 
   for (size_t i = 0; i < fileCount; i++) {
     File f = SD_MMC.open(files[i], FILE_READ);
@@ -600,7 +734,7 @@ void loadAllSpritesToPSRAM() {
     size_t sz = f.size();
     uint8_t* buf = (uint8_t*)ps_malloc(sz);
     if (!buf) {
-      Serial.printf("[ERR] Нет памяти для %s\n", files[i]);
+      //Serial.printf("[ERR] Нет памяти для %s\n", files[i]);
       f.close();
       continue;
     }
@@ -612,7 +746,6 @@ void loadAllSpritesToPSRAM() {
     Serial.printf("[OK] Загружен %s (%u байт)\n", files[i], sz);
   }
 }
-
 
 // Поиск спрайта в кеше
 uint8_t* getSpriteFromCache(const char* filename, size_t& outSize) {
@@ -630,7 +763,6 @@ uint8_t* getSpriteFromCache(const char* filename, size_t& outSize) {
 void setup() {
     Serial.begin(115200);
     delay(1000);
-    
     tft.init();
     tft.setRotation(0);
     tft.fillScreen(TFT_BLACK);
@@ -659,19 +791,27 @@ void setup() {
     loadAllSpritesToPSRAM();
     Serial.println("[INFO] Спрайты готовы!");
 
+    bgStart = (uint16_t*)getSpriteFromCache(START_BG_FILE, bgSizeStart);
+    bgMain  = (uint16_t*)getSpriteFromCache(MAIN_BG_FILE, bgSizeMain);
+    bgGameOver = (uint16_t*)getSpriteFromCache(GAMEOVER_BG_FILE, bgSizeGameOver);
+    
     highScore = readHighScore();
     changeState(STATE_LOGO);
 }
 
 void loop() {
+    uint32_t now = millis();
+    if (now - lastFrameTime < 33) return; // 30 FPS
+    lastFrameTime = now;
+    InputState input = getInputState();
+
     uint32_t currentTime = millis();
-    uint32_t deltaTime = currentTime - lastFrameTime;
-    
-    if (deltaTime >= 33) { // 30 FPS
-        InputState input = getInputState();
+
         
         switch (currentState) {
+
             case STATE_LOGO:
+                drawImageFromPSRAM(LOGO_FILE, 0, 0, 128, 160);
                 if (currentTime - stateStartTime >= LOGO_DISPLAY_TIME) {
                     changeState(STATE_MENU);
                     //playRandomTrack(introTracks, 3);
@@ -680,6 +820,9 @@ void loop() {
                 break;
                 
             case STATE_MENU:
+                tft.pushImage(0, 0, BG_WIDTH, BG_HEIGHT, bgCurrent);
+                if ((now / 700) % 2 == 0)
+                    drawImageFromPSRAM(PRESS_FILE, 40, 120, PRESS_WIDTH, PRESS_HEIGHT);
                 if (input.encoderPressed) {
                     changeState(STATE_PLAY);
                     //playRandomTrack(mainTracks, 5);
@@ -689,14 +832,14 @@ void loop() {
                 
                 // Анимация названия
                 if ((currentTime / 1000) % 2 == 0) {
-                    drawImageFromSD(NAME1_FILE, 5, 20, NAME_WIDTH, NAME_HEIGHT);
+                    drawImageFromPSRAM(NAME1_FILE, 5, 20, NAME_WIDTH, NAME_HEIGHT);
                 } else {
-                    drawImageFromSD(NAME2_FILE, 5, 20, NAME_WIDTH, NAME_HEIGHT);
+                    drawImageFromPSRAM(NAME2_FILE, 5, 20, NAME_WIDTH, NAME_HEIGHT);
                 }
                 
                 // Мигающая надпись
                 if ((currentTime / 500) % 2 == 0) {
-                    drawImageFromSD(PRESS_FILE, 40, 120, PRESS_WIDTH, PRESS_HEIGHT);
+                    drawImageFromPSRAM(PRESS_FILE, 40, 120, PRESS_WIDTH, PRESS_HEIGHT);
                     digitalWrite(LED_PIN, HIGH);
                 } else {
                     digitalWrite(LED_PIN, LOW);
@@ -705,6 +848,9 @@ void loop() {
                 
             case STATE_PLAY:
                 // Обновление игры
+
+                bgCurrent = bgMain;
+
                 playerShip.rotation = input.encoderAngle;
 
                 if (input.buttonA) {
@@ -774,7 +920,22 @@ void loop() {
 
                 // Отрисовка игры
                 drawGameBackground();
-                drawShip(playerShip.base.x, playerShip.base.y, playerShip.rotation, playerShip.boosting);
+                static uint32_t lastBoostAnimTime = 0;
+if (playerShip.boosting) {
+    if (millis() - lastBoostAnimTime > 80) {
+        playerShip.boostFrame = (playerShip.boostFrame + 1) % 3;
+        lastBoostAnimTime = millis();
+    }
+}
+
+drawShipFromPSRAM(
+    (int)playerShip.base.x,
+    (int)playerShip.base.y,
+    playerShip.rotation,
+    playerShip.boosting,
+    playerShip.boostFrame
+);
+
                 
                 for (int i = 0; i < MAX_BULLETS; i++) {
                     if (bullets[i].base.active) {
@@ -814,11 +975,11 @@ void loop() {
         frameCount++;
 
   // Каждые 5 секунд печатаем статистику
-  unsigned long now = millis();
+  //unsigned long now = millis();
   if (now - lastStatsTime >= 5000) {
     lastStatsTime = now;
     printStats();
   }
     } 
-    delay(1);
-}
+/*    delay(1);
+}*/
