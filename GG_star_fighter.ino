@@ -31,28 +31,8 @@ constexpr const char* NAME2_FILE = "/spr_main_name2.bin";
 constexpr const char* PRESS_FILE = "/spr_press_RB.bin"; //поменять на рисование текста
 constexpr const char* MAIN_BG_FILE = "/spr_main_BG.bin";
 constexpr const char* SHIP_BOOST_FILE = "/spr_ship_boost_000_1.bin";
-constexpr const char* SHIP_STAY_FILES[36] = {
-  "/spr_ship_stay_000.bin", "/spr_ship_stay_010.bin", "/spr_ship_stay_020.bin", "/spr_ship_stay_030.bin", 
-  "/spr_ship_stay_040.bin", "/spr_ship_stay_050.bin", "/spr_ship_stay_060.bin", "/spr_ship_stay_070.bin", 
-  "/spr_ship_stay_080.bin", "/spr_ship_stay_090.bin", "/spr_ship_stay_100.bin", "/spr_ship_stay_110.bin",
-  "/spr_ship_stay_120.bin", "/spr_ship_stay_130.bin", "/spr_ship_stay_140.bin", "/spr_ship_stay_150.bin", 
-  "/spr_ship_stay_160.bin", "/spr_ship_stay_170.bin", "/spr_ship_stay_180.bin", "/spr_ship_stay_190.bin", 
-  "/spr_ship_stay_200.bin", "/spr_ship_stay_210.bin", "/spr_ship_stay_220.bin", "/spr_ship_stay_230.bin",
-  "/spr_ship_stay_240.bin", "/spr_ship_stay_250.bin", "/spr_ship_stay_260.bin", "/spr_ship_stay_270.bin", 
-  "/spr_ship_stay_280.bin", "/spr_ship_stay_290.bin", "/spr_ship_stay_300.bin", "/spr_ship_stay_310.bin", 
-  "/spr_ship_stay_320.bin", "/spr_ship_stay_330.bin", "/spr_ship_stay_340.bin", "/spr_ship_stay_350.bin"
-};
-constexpr const char* BULLET_FILES[36] = {
-    "/spr_bullet_000.bin", "/spr_bullet_010.bin", "/spr_bullet_020.bin", "/spr_bullet_030.bin", 
-    "/spr_bullet_040.bin", "/spr_bullet_050.bin", "/spr_bullet_060.bin", "/spr_bullet_070.bin", 
-    "/spr_bullet_080.bin", "/spr_bullet_090.bin", "/spr_bullet_100.bin", "/spr_bullet_110.bin", 
-    "/spr_bullet_120.bin", "/spr_bullet_130.bin", "/spr_bullet_140.bin", "/spr_bullet_150.bin", 
-    "/spr_bullet_160.bin", "/spr_bullet_170.bin", "/spr_bullet_180.bin", "/spr_bullet_190.bin",
-    "/spr_bullet_200.bin", "/spr_bullet_210.bin", "/spr_bullet_220.bin", "/spr_bullet_230.bin", 
-    "/spr_bullet_240.bin", "/spr_bullet_250.bin", "/spr_bullet_260.bin", "/spr_bullet_270.bin", 
-    "/spr_bullet_280.bin", "/spr_bullet_290.bin", "/spr_bullet_300.bin", "/spr_bullet_310.bin", 
-    "/spr_bullet_320.bin", "/spr_bullet_330.bin", "/spr_bullet_340.bin", "/spr_bullet_350.bin"
-};
+constexpr const char* SHIP_STAY_FILE = "/spr_ship_stay_000.bin";
+constexpr const char* BULLET_FILE = "/spr_bullet_000.bin";
 constexpr const char* ASTEROID_FILE = "/spr_asteroid_1.bin";
 constexpr const char* COMET_FILE = "/spr_comet_000.bin";
 constexpr const char* BOOM_BIG_FILE = "/spr_boom_big1.bin";
@@ -88,14 +68,12 @@ constexpr uint8_t GOTEXT_HEIGHT = 35;
 constexpr uint8_t MAX_BULLETS = 5;
 constexpr uint8_t MAX_ASTEROIDS = 10;
 constexpr uint32_t BULLET_DELAY = 300;
-constexpr float SHIP_SPEED = 1.0f;
+constexpr float SHIP_SPEED = 2.0f;
 constexpr float BULLET_SPEED = 4.0f;
 constexpr float ASTEROID_BASE_SPEED = 1.0f;
 constexpr float COMET_SPEED_MULTIPLIER = 1.5f;
 constexpr uint32_t LOGO_DISPLAY_TIME = 2000;
 constexpr unsigned long DEBOUNCE_MS = 50;
-
-#define TRANSPARENT_COLOR 0xF81F
 
 // ==================== СТРУКТУРЫ И ПЕРЕЧИСЛЕНИЯ ====================
 struct Entity {
@@ -252,18 +230,10 @@ void writeHighScore(int score) {
 
 // ==================== ФУНКЦИИ ОТРИСОВКИ ====================
 void drawImageFromPSRAM(const char* filename, int x, int y, int w, int h) {
-    size_t size;
-    uint16_t* data = (uint16_t*)getSpriteFromCache(filename, size);
-    if (!data) return;
-
-    for (int j = 0; j < h; j++) {
-        for (int i = 0; i < w; i++) {
-            uint16_t color = data[j * w + i];  // берём цвет из спрайта
-            if (color != TRANSPARENT_COLOR) {
-                tft.drawPixel(x + i, y + j, color);
-            }
-        }
-    }
+  size_t size;
+  uint8_t* data = getSpriteFromCache(filename, size); // уже есть
+  if (!data) return;
+  tft.pushImage(x, y, w, h, (uint16_t*)data);
 }
 
 void restoreBgArea(int x, int y, int w, int h) {
@@ -717,13 +687,8 @@ std::vector<SpriteData> spriteCache;
 void loadAllSpritesToPSRAM() {
   const char* files[] = {
     LOGO_FILE, START_BG_FILE, MAIN_BG_FILE, GAMEOVER_BG_FILE, NAME1_FILE, NAME2_FILE, PRESS_FILE, ASTEROID_FILE, BOOM_BIG_FILE, 
-    BOOM_SMALL_FILE, COMET_FILE, GAMEOVER_TEXT_FILE, SHIP_BOOST_FILE };
+    BOOM_SMALL_FILE, BULLET_FILE, COMET_FILE, GAMEOVER_TEXT_FILE, SHIP_BOOST_FILE, SHIP_STAY_FILE };
   size_t fileCount = sizeof(files) / sizeof(files[0]);
-
-  for (int i = 0; i < 36; i++) {
-    loadFileToPSRAM(SHIP_STAY_FILES[i]);
-    loadFileToPSRAM(BULLET_FILES[i]);
-    }
 
   for (size_t i = 0; i < fileCount; i++) {
     File f = SD_MMC.open(files[i], FILE_READ);
@@ -734,7 +699,7 @@ void loadAllSpritesToPSRAM() {
     size_t sz = f.size();
     uint8_t* buf = (uint8_t*)ps_malloc(sz);
     if (!buf) {
-      //Serial.printf("[ERR] Нет памяти для %s\n", files[i]);
+      Serial.printf("[ERR] Нет памяти для %s\n", files[i]);
       f.close();
       continue;
     }
@@ -763,6 +728,7 @@ uint8_t* getSpriteFromCache(const char* filename, size_t& outSize) {
 void setup() {
     Serial.begin(115200);
     delay(1000);
+    
     tft.init();
     tft.setRotation(0);
     tft.fillScreen(TFT_BLACK);
