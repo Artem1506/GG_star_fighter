@@ -30,7 +30,44 @@ constexpr const char* NAME1_FILE = "/spr_main_name.bin";
 constexpr const char* NAME2_FILE = "/spr_main_name2.bin";
 constexpr const char* PRESS_FILE = "/spr_press_RB.bin"; //поменять на рисование текста
 constexpr const char* MAIN_BG_FILE = "/spr_main_BG.bin";
-constexpr const char* SHIP_BOOST_FILE = "/spr_ship_boost_000_1.bin";
+constexpr const char* SHIP_BOOST_FILES[36][3] = {
+  {"/spr_ship_boost_000_1.bin","/spr_ship_boost_000_2.bin","/spr_ship_boost_000_3.bin"},
+  {"/spr_ship_boost_010_1.bin","/spr_ship_boost_010_2.bin","/spr_ship_boost_010_3.bin"},
+  {"/spr_ship_boost_020_1.bin","/spr_ship_boost_020_2.bin","/spr_ship_boost_020_3.bin"},
+  {"/spr_ship_boost_030_1.bin","/spr_ship_boost_030_2.bin","/spr_ship_boost_030_3.bin"},
+  {"/spr_ship_boost_040_1.bin","/spr_ship_boost_040_2.bin","/spr_ship_boost_040_3.bin"},
+  {"/spr_ship_boost_050_1.bin","/spr_ship_boost_050_2.bin","/spr_ship_boost_050_3.bin"},
+  {"/spr_ship_boost_060_1.bin","/spr_ship_boost_060_2.bin","/spr_ship_boost_060_3.bin"},
+  {"/spr_ship_boost_070_1.bin","/spr_ship_boost_070_2.bin","/spr_ship_boost_070_3.bin"},
+  {"/spr_ship_boost_080_1.bin","/spr_ship_boost_080_2.bin","/spr_ship_boost_080_3.bin"},
+  {"/spr_ship_boost_090_1.bin","/spr_ship_boost_090_2.bin","/spr_ship_boost_090_3.bin"},
+  {"/spr_ship_boost_100_1.bin","/spr_ship_boost_100_2.bin","/spr_ship_boost_100_3.bin"},
+  {"/spr_ship_boost_110_1.bin","/spr_ship_boost_110_2.bin","/spr_ship_boost_110_3.bin"},
+  {"/spr_ship_boost_120_1.bin","/spr_ship_boost_120_2.bin","/spr_ship_boost_120_3.bin"},
+  {"/spr_ship_boost_130_1.bin","/spr_ship_boost_130_2.bin","/spr_ship_boost_130_3.bin"},
+  {"/spr_ship_boost_140_1.bin","/spr_ship_boost_140_2.bin","/spr_ship_boost_140_3.bin"},
+  {"/spr_ship_boost_150_1.bin","/spr_ship_boost_150_2.bin","/spr_ship_boost_150_3.bin"},
+  {"/spr_ship_boost_160_1.bin","/spr_ship_boost_160_2.bin","/spr_ship_boost_160_3.bin"},
+  {"/spr_ship_boost_170_1.bin","/spr_ship_boost_170_2.bin","/spr_ship_boost_170_3.bin"},
+  {"/spr_ship_boost_180_1.bin","/spr_ship_boost_180_2.bin","/spr_ship_boost_180_3.bin"},
+  {"/spr_ship_boost_190_1.bin","/spr_ship_boost_190_2.bin","/spr_ship_boost_190_3.bin"},
+  {"/spr_ship_boost_200_1.bin","/spr_ship_boost_200_2.bin","/spr_ship_boost_200_3.bin"},
+  {"/spr_ship_boost_210_1.bin","/spr_ship_boost_210_2.bin","/spr_ship_boost_210_3.bin"},
+  {"/spr_ship_boost_220_1.bin","/spr_ship_boost_220_2.bin","/spr_ship_boost_220_3.bin"},
+  {"/spr_ship_boost_230_1.bin","/spr_ship_boost_230_2.bin","/spr_ship_boost_230_3.bin"},
+  {"/spr_ship_boost_240_1.bin","/spr_ship_boost_240_2.bin","/spr_ship_boost_240_3.bin"},
+  {"/spr_ship_boost_250_1.bin","/spr_ship_boost_250_2.bin","/spr_ship_boost_250_3.bin"},
+  {"/spr_ship_boost_260_1.bin","/spr_ship_boost_260_2.bin","/spr_ship_boost_260_3.bin"},
+  {"/spr_ship_boost_270_1.bin","/spr_ship_boost_270_2.bin","/spr_ship_boost_270_3.bin"},
+  {"/spr_ship_boost_280_1.bin","/spr_ship_boost_280_2.bin","/spr_ship_boost_280_3.bin"},
+  {"/spr_ship_boost_290_1.bin","/spr_ship_boost_290_2.bin","/spr_ship_boost_290_3.bin"},
+  {"/spr_ship_boost_300_1.bin","/spr_ship_boost_300_2.bin","/spr_ship_boost_300_3.bin"},
+  {"/spr_ship_boost_310_1.bin","/spr_ship_boost_310_2.bin","/spr_ship_boost_310_3.bin"},
+  {"/spr_ship_boost_320_1.bin","/spr_ship_boost_320_2.bin","/spr_ship_boost_320_3.bin"},
+  {"/spr_ship_boost_330_1.bin","/spr_ship_boost_330_2.bin","/spr_ship_boost_330_3.bin"},
+  {"/spr_ship_boost_340_1.bin","/spr_ship_boost_340_2.bin","/spr_ship_boost_340_3.bin"},
+  {"/spr_ship_boost_350_1.bin","/spr_ship_boost_350_2.bin","/spr_ship_boost_350_3.bin"}
+};
 constexpr const char* SHIP_STAY_FILES[36] = {
   "/spr_ship_stay_000.bin", "/spr_ship_stay_010.bin", "/spr_ship_stay_020.bin", "/spr_ship_stay_030.bin", 
   "/spr_ship_stay_040.bin", "/spr_ship_stay_050.bin", "/spr_ship_stay_060.bin", "/spr_ship_stay_070.bin", 
@@ -713,38 +750,42 @@ struct SpriteData {
 
 std::vector<SpriteData> spriteCache;
 
-// Загружаем все спрайты в PSRAM
-void loadAllSpritesToPSRAM() {
-  const char* files[] = {
-    LOGO_FILE, START_BG_FILE, MAIN_BG_FILE, GAMEOVER_BG_FILE, NAME1_FILE, NAME2_FILE, PRESS_FILE, ASTEROID_FILE, BOOM_BIG_FILE, 
-    BOOM_SMALL_FILE, COMET_FILE, GAMEOVER_TEXT_FILE, SHIP_BOOST_FILE };
-  size_t fileCount = sizeof(files) / sizeof(files[0]);
-
-  for (int i = 0; i < 36; i++) {
-    loadFileToPSRAM(SHIP_STAY_FILES[i]);
-    loadFileToPSRAM(BULLET_FILES[i]);
-    }
-
-  for (size_t i = 0; i < fileCount; i++) {
-    File f = SD_MMC.open(files[i], FILE_READ);
+void loadFileToPSRAM(const char* filename) {
+    File f = SD_MMC.open(filename, FILE_READ);
     if (!f) {
-      Serial.printf("[ERR] Не найден файл %s\n", files[i]);
-      continue;
+        Serial.printf("[ERR] Не найден файл %s\n", filename);
+        return;
     }
     size_t sz = f.size();
     uint8_t* buf = (uint8_t*)ps_malloc(sz);
     if (!buf) {
-      //Serial.printf("[ERR] Нет памяти для %s\n", files[i]);
-      f.close();
-      continue;
+        Serial.printf("[ERR] Нет памяти для %s\n", filename);
+        f.close();
+        return;
     }
     f.read(buf, sz);
     f.close();
+    spriteCache.push_back({String(filename), buf, sz});
+    Serial.printf("[OK] Загружен %s (%u байт)\n", filename, sz);
+}
 
-    SpriteData s = {String(files[i]), buf, sz};
-    spriteCache.push_back(s);
-    Serial.printf("[OK] Загружен %s (%u байт)\n", files[i], sz);
-  }
+// Загружаем все спрайты в PSRAM
+void loadAllSpritesToPSRAM() {
+    const char* files[] = {
+        LOGO_FILE, START_BG_FILE, MAIN_BG_FILE, GAMEOVER_BG_FILE,
+        NAME1_FILE, NAME2_FILE, PRESS_FILE, ASTEROID_FILE,
+        BOOM_BIG_FILE, BOOM_SMALL_FILE
+    };
+
+    for (auto file : files) loadFileToPSRAM(file);
+
+    // Загружаем массивы
+    for (int i = 0; i < 36; i++) {
+        loadFileToPSRAM(SHIP_STAY_FILES[i]);
+        loadFileToPSRAM(BULLET_FILES[i]);
+        for (int f = 0; f < 3; f++)
+            loadFileToPSRAM(SHIP_BOOST_FILES[i][f]);
+    }
 }
 
 // Поиск спрайта в кеше
