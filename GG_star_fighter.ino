@@ -4,6 +4,7 @@
 #include <driver/gpio.h>
 #include <driver/i2s.h>
 #include <cmath>
+#include <vector>
 
 
 // ==================== КОНСТАНТЫ ПИНОВ ====================
@@ -129,10 +130,10 @@ constexpr float SHIP_SPEED = 1.0f;
 constexpr float BULLET_SPEED = 4.0f;
 constexpr float ASTEROID_BASE_SPEED = 1.0f;
 constexpr float COMET_SPEED_MULTIPLIER = 1.5f;
-constexpr uint32_t LOGO_DISPLAY_TIME = 2000;
+constexpr uint32_t LOGO_DISPLAY_TIME = 20000;
 constexpr unsigned long DEBOUNCE_MS = 50;
 
-#define TRANSPARENT_COLOR 0xF81F
+#define TFT_TRANSPARENT_COLOR 0xF81F
 
 // ==================== СТРУКТУРЫ И ПЕРЕЧИСЛЕНИЯ ====================
 struct Entity {
@@ -177,6 +178,12 @@ struct InputState {
     bool buttonB;
 };
 
+struct SpriteData {
+  String name;
+  uint16_t* data;
+  size_t size;
+};
+
 enum GameState {
     STATE_LOGO,
     STATE_MENU,
@@ -199,6 +206,11 @@ uint8_t activeAsteroids = 0;
 
 volatile int32_t encoderPos = 0;
 volatile int lastEncoderARaw = 0;
+
+// Буфер для сохранения фона под корабль (48x48 примерно достаточно)
+uint16_t shipBgBackup[SHIP_WIDTH * SHIP_HEIGHT];
+int lastShipX = -100, lastShipY = -100;
+
 
 // ===== GLOBAL BACKGROUND DATA =====
 uint16_t* bgBuffer = nullptr;      // буфер текущего фона в PSRAM
@@ -288,18 +300,108 @@ void writeHighScore(int score) {
 }
 
 // ==================== ФУНКЦИИ ОТРИСОВКИ ====================
-void drawImageFromPSRAM(const char* filename, int x, int y, int w, int h) {
-    size_t size;
+
+static inline void drawSpriteFromPSRAM(const char* filename, int x, int y, int w, int h,
+                                       uint16_t* bgPtr = nullptr, int bgW = BG_WIDTH, int bgH = BG_HEIGHT) {
+    // Получаем спрайт из кеша (в PSRAM, RGB565)
+    size_t spriteSizePixels = 0;
+    uint16_t* sprite = (uint16_t*)getSpriteFromCache(filename, spriteSizePixels);
+    if (!sprite) return;
+
+    // Если bgPtr не передан — используем bgCurrent (глобальная переменная в твоем коде)
+    if (!bgPtr) bgPtr = bgCurrent;
+    if (!bgPtr) {
+        // Без фона прозрачные пиксели нельзя корректно подставить — просто нарисуем без прозрачности
+        tft.pushImage(x, y, w, h, sprite);
+        return;
+    }
+
+    // Видимый прямоугольник с учётом экрана
+    int sx = x, sy = y, sw = w, sh = h;
+    // clip по экрану (0..SCREEN_WIDTH-1 / 0..SCREEN_HEIGHT-1)
+    if (sx + sw <= 0 || sy + sh <= 0 || sx >= SCREEN_WIDTH || sy >= SCREEN_HEIGHT) return; // полностью вне
+    int srcXOffset = 0, srcYOffset = 0;
+    if (sx < 0) { srcXOffset = -sx; sw += sx; sx = 0; }          // sx was negative
+    if (sy < 0) { srcYOffset = -sy; sh += sy; sy = 0; }          // sy was negative
+    if (sx + sw > SCREEN_WIDTH) sw = SCREEN_WIDTH - sx;
+    if (sy + sh > SCREEN_HEIGHT) sh = SCREEN_HEIGHT - sy;
+    if (sw <= 0 || sh <= 0) return;
+
+    // Временный буфер для одной строки (макс ширина 128). static — один буфер для всех вызовов.
+    static uint16_t rowBuf[128]; // 128 * 2 = 256 bytes — очень мало
+    // Проверка размеров на случай, если w > 128 (в твоём проекте max 128, но на всякий)
+    if (w > 128) {
+        // не ожидается, но на всякий случай — отрезаем (ниже мы работаем с sw)
+    }
+
+    // Для каждой видимой строки:
+    for (int row = 0; row < sh; ++row) {
+        int spriteRowIndex = (srcYOffset + row) * w + srcXOffset; // индекс первого пикселя этой видимой строки в sprite
+        uint16_t* spriteRowPtr = sprite + spriteRowIndex;
+
+        // Сначала проверим, есть ли в этой видимой строке хоть один прозрачный пиксель.
+        bool hasTransparent = false;
+        for (int col = 0; col < sw; ++col) {
+            if (spriteRowPtr[col] == (uint16_t)TFT_TRANSPARENT_COLOR) { hasTransparent = true; break; }
+        }
+
+        if (!hasTransparent) {
+            // Строка полностью непрозрачна — отправляем напрямую (уменьшаем указатель, т.к. pushImage ожидает полный ряд)
+            // Но pushImage принимает указатель на начало строки нужной длины: spriteRowPtr указывает именно на первый видимый пиксель.
+            tft.pushImage(sx, sy + row, sw, 1, spriteRowPtr);
+        } else {
+            // Нужно собрать строку, заменив прозрачные пиксели на фон
+            // Вычисляем указатель на фоновые пиксели
+            // bgPtr хранит фон полной ширины bgW (обычно BG_WIDTH), берём пиксели с координат (sx .. sx+sw-1, sy+row)
+            uint16_t* bgRowPtr = bgPtr + (sy + row) * bgW + sx;
+
+            // Собираем временный буфер
+            for (int col = 0; col < sw; ++col) {
+                uint16_t sp = spriteRowPtr[col];
+                if (sp == (uint16_t)TFT_TRANSPARENT_COLOR) {
+                    rowBuf[col] = bgRowPtr[col];
+                } else {
+                    rowBuf[col] = sp;
+                }
+            }
+            // Отправляем собранную строку
+            tft.pushImage(sx, sy + row, sw, 1, rowBuf);
+        }
+    }
+}
+
+/*static inline void drawSpriteFromPSRAM(const char* filename, int x, int y, int w, int h) {
+    size_t size = 0;
     uint16_t* data = (uint16_t*)getSpriteFromCache(filename, size);
     if (!data) return;
+    tft.pushImage(x, y, w, h, data, (uint16_t)TFT_TRANSPARENT_COLOR);
+}*/
+//временная отрисовка по пикселям для дебага
+/*static void drawSpriteFromPSRAM(const char* filename, int x, int y, int w, int h)
+{
+    size_t size = 0;
+    uint16_t* data = (uint16_t*)getSpriteFromCache(filename, size);
+    if (!data || size < w * h) {
+        Serial.printf("[DEBUG] Sprite %s not found or size mismatch\n", filename);
+        return;
+    }
 
     for (int j = 0; j < h; j++) {
         for (int i = 0; i < w; i++) {
-            uint16_t color = data[j * w + i];  // берём цвет из спрайта
-            if (color != TRANSPARENT_COLOR) {
+            uint16_t color = data[j * w + i];
+            if (color != TFT_TRANSPARENT_COLOR) {
                 tft.drawPixel(x + i, y + j, color);
             }
         }
+    }
+
+    Serial.printf("[DEBUG] Sprite %s drawn at (%d,%d) size %dx%d\n", filename, x, y, w, h);
+}*/
+
+
+void saveBgArea(int x, int y, int w, int h, uint16_t* buffer) {
+    for (int i = 0; i < h; i++) {
+        memcpy(buffer + i * w, bgBuffer + (y + i) * BG_WIDTH + x, w * 2);
     }
 }
 
@@ -352,9 +454,9 @@ void restoreAreaAndRedrawObjects(uint16_t* bgPtr, int bgW, int bgH,
         if (dir < 0) dir += 360;
         int norm = (dir / 10) * 10;
         snprintf(nameBuf, sizeof(nameBuf), "/spr_comet_%03d.bin", norm);
-        drawImageFromPSRAM(nameBuf, ax, ay, COMET_WIDTH, COMET_HEIGHT);
+        drawSpriteFromPSRAM(nameBuf, ax, ay, COMET_WIDTH, COMET_HEIGHT);
       } else {
-        drawImageFromPSRAM(ASTEROID_FILE, ax, ay, ASTEROID_WIDTH, ASTEROID_HEIGHT);
+        drawSpriteFromPSRAM(ASTEROID_FILE, ax, ay, ASTEROID_WIDTH, ASTEROID_HEIGHT);
       }
     }
   }
@@ -370,7 +472,7 @@ void restoreAreaAndRedrawObjects(uint16_t* bgPtr, int bgW, int bgH,
       if (ang < 0) ang += 360;
       int norm = (ang / 10) * 10;
       snprintf(nameBuf, sizeof(nameBuf), "/spr_bullet_%03d.bin", norm);
-      drawImageFromPSRAM(nameBuf, bx, by, BULLET_WIDTH, BULLET_HEIGHT);
+      drawSpriteFromPSRAM(nameBuf, bx, by, BULLET_WIDTH, BULLET_HEIGHT);
     }
   }
 
@@ -385,13 +487,25 @@ void restoreAreaAndRedrawObjects(uint16_t* bgPtr, int bgW, int bgH,
       } else {
         snprintf(nameBuf, sizeof(nameBuf), "/spr_ship_stay_%03d.bin", norm);
       }
-      drawImageFromPSRAM(nameBuf, sx, sy, SHIP_WIDTH, SHIP_HEIGHT);
+      drawSpriteFromPSRAM(nameBuf, sx, sy, SHIP_WIDTH, SHIP_HEIGHT);
     }
   }
 }
 
 void drawShipFromPSRAM(int16_t x, int16_t y, int16_t angle, bool boosting, uint8_t boostFrame) {
     char filename[40];
+
+   /* // Восстановить фон в прошлой позиции корабля
+    if (lastShipX > -50) {
+        restoreBgArea(lastShipX - SHIP_WIDTH/2, lastShipY - SHIP_HEIGHT/2, SHIP_WIDTH, SHIP_HEIGHT);
+    }
+
+    // Сохранить фон под новой позицией
+    saveBgArea(x - SHIP_WIDTH/2, y - SHIP_HEIGHT/2, SHIP_WIDTH, SHIP_HEIGHT, shipBgBackup);
+
+    // Запомнить новую позицию
+    lastShipX = x;
+    lastShipY = y; */
 
     // нормализация угла
     int normAngle = angle % 360;
@@ -401,11 +515,9 @@ void drawShipFromPSRAM(int16_t x, int16_t y, int16_t angle, bool boosting, uint8
     // имя файла
     if (boosting) {
         if (boostFrame > 2) boostFrame = 2;
-        snprintf(filename, sizeof(filename),
-                 "/spr_ship_boost_%03d_%d.bin", normAngle, boostFrame + 1);
+        snprintf(filename, sizeof(filename), "/spr_ship_boost_%03d_%d.bin", normAngle, boostFrame + 1);
     } else {
-        snprintf(filename, sizeof(filename),
-                 "/spr_ship_stay_%03d.bin", normAngle);
+        snprintf(filename, sizeof(filename), "/spr_ship_stay_%03d.bin", normAngle);
     }
 
     size_t fileSize;
@@ -413,24 +525,24 @@ void drawShipFromPSRAM(int16_t x, int16_t y, int16_t angle, bool boosting, uint8
     if (!sprite) return;
 
     // рисуем
-    tft.pushImage(x - SHIP_WIDTH/2, y - SHIP_HEIGHT/2, SHIP_WIDTH, SHIP_HEIGHT, sprite, TFT_MAGENTA);
+    tft.pushImage(x - SHIP_WIDTH/2, y - SHIP_HEIGHT/2, SHIP_WIDTH, SHIP_HEIGHT, sprite, TFT_TRANSPARENT_COLOR);
 }
 
 
 void drawLogo() {
-    drawImageFromPSRAM(LOGO_FILE, 0, 0, LOGO_WIDTH, LOGO_HEIGHT);
+    drawSpriteFromPSRAM(LOGO_FILE, 0, 0, LOGO_WIDTH, LOGO_HEIGHT);
 }
 
 void drawMenuBackground() {
-    drawImageFromPSRAM(START_BG_FILE, 0, 0, BG_WIDTH, BG_HEIGHT);
+    drawSpriteFromPSRAM(START_BG_FILE, 0, 0, BG_WIDTH, BG_HEIGHT);
 }
 
 void drawGameBackground() {
-    drawImageFromPSRAM(MAIN_BG_FILE, 0, 0, BG_WIDTH, BG_HEIGHT);
+    drawSpriteFromPSRAM(MAIN_BG_FILE, 0, 0, BG_WIDTH, BG_HEIGHT);
 }
 
 void drawGameOverBackground() {
-    drawImageFromPSRAM(GAMEOVER_BG_FILE, 0, 0, BG_WIDTH, BG_HEIGHT);
+    drawSpriteFromPSRAM(GAMEOVER_BG_FILE, 0, 0, BG_WIDTH, BG_HEIGHT);
 }
 
 void drawShip(int16_t x, int16_t y, uint16_t angle, bool isBoosting = false, uint8_t boostFrame = 0) {
@@ -443,7 +555,7 @@ void drawShip(int16_t x, int16_t y, uint16_t angle, bool isBoosting = false, uin
         snprintf(filename, sizeof(filename), "/spr_ship_stay_%03d.bin", normalizedAngle);
     }
     
-    drawImageFromPSRAM(filename, x - SHIP_WIDTH/2, y - SHIP_HEIGHT/2, SHIP_WIDTH, SHIP_HEIGHT);
+    drawSpriteFromPSRAM(filename, x - SHIP_WIDTH/2, y - SHIP_HEIGHT/2, SHIP_WIDTH, SHIP_HEIGHT);
 }
 
 void drawBullet(int16_t x, int16_t y, uint16_t angle) {
@@ -451,7 +563,7 @@ void drawBullet(int16_t x, int16_t y, uint16_t angle) {
     uint16_t normalizedAngle = (angle / 10) * 10;
     snprintf(filename, sizeof(filename), "/spr_bullet_%03d.bin", normalizedAngle);
     
-    drawImageFromPSRAM(filename, x - BULLET_WIDTH/2, y - BULLET_HEIGHT/2, BULLET_WIDTH, BULLET_HEIGHT);
+    drawSpriteFromPSRAM(filename, x - BULLET_WIDTH/2, y - BULLET_HEIGHT/2, BULLET_WIDTH, BULLET_HEIGHT);
 }
 
 void drawAsteroid(int16_t x, int16_t y, uint8_t size, bool isComet, uint16_t direction) {
@@ -464,7 +576,7 @@ void drawAsteroid(int16_t x, int16_t y, uint8_t size, bool isComet, uint16_t dir
         snprintf(filename, sizeof(filename), "/spr_asteroid_1.bin", size);
     }
     
-    drawImageFromPSRAM(filename, x - (isComet ? COMET_WIDTH : ASTEROID_WIDTH)/2, 
+    drawSpriteFromPSRAM(filename, x - (isComet ? COMET_WIDTH : ASTEROID_WIDTH)/2, 
                    y - (isComet ? COMET_HEIGHT : ASTEROID_HEIGHT)/2, 
                    isComet ? COMET_WIDTH : ASTEROID_WIDTH, 
                    isComet ? COMET_HEIGHT : ASTEROID_HEIGHT);
@@ -742,11 +854,6 @@ void checkCollisions() {
 }
 
 // ==================== КЭШ СПРАЙТОВ В PSRAM ====================
-struct SpriteData {
-  String name;
-  uint8_t* data;
-  size_t size;
-};
 
 std::vector<SpriteData> spriteCache;
 
@@ -757,7 +864,7 @@ void loadFileToPSRAM(const char* filename) {
         return;
     }
     size_t sz = f.size();
-    uint8_t* buf = (uint8_t*)ps_malloc(sz);
+    uint8_t* buf = (uint8_t*)malloc(sz);;
     if (!buf) {
         Serial.printf("[ERR] Нет памяти для %s\n", filename);
         f.close();
@@ -765,8 +872,13 @@ void loadFileToPSRAM(const char* filename) {
     }
     f.read(buf, sz);
     f.close();
-    spriteCache.push_back({String(filename), buf, sz});
-    Serial.printf("[OK] Загружен %s (%u байт)\n", filename, sz);
+
+    SpriteData entry;
+    entry.name = String(filename);
+    entry.data = reinterpret_cast<uint16_t*>(buf);
+    entry.size = sz / 2; // количество пикселей
+    spriteCache.push_back(entry);
+    Serial.printf("[OK] Загружен %s (%u байт, %u пикселей)\n", filename, sz, entry.size);
 }
 
 // Загружаем все спрайты в PSRAM
@@ -789,9 +901,9 @@ void loadAllSpritesToPSRAM() {
 }
 
 // Поиск спрайта в кеше
-uint8_t* getSpriteFromCache(const char* filename, size_t& outSize) {
-  for (auto& s : spriteCache) {
-    if (s.name.equals(filename)) {
+uint16_t* getSpriteFromCache(const char* name, size_t& outSize) {
+  for (auto &s : spriteCache) {
+    if (s.name.equals(name)) {
       outSize = s.size;
       return s.data;
     }
@@ -844,6 +956,7 @@ void loop() {
     uint32_t now = millis();
     if (now - lastFrameTime < 33) return; // 30 FPS
     lastFrameTime = now;
+
     InputState input = getInputState();
 
     uint32_t currentTime = millis();
@@ -852,7 +965,7 @@ void loop() {
         switch (currentState) {
 
             case STATE_LOGO:
-                drawImageFromPSRAM(LOGO_FILE, 0, 0, 128, 160);
+                drawSpriteFromPSRAM(LOGO_FILE, 0, 0, 128, 160);
                 if (currentTime - stateStartTime >= LOGO_DISPLAY_TIME) {
                     changeState(STATE_MENU);
                     //playRandomTrack(introTracks, 3);
@@ -861,9 +974,9 @@ void loop() {
                 break;
                 
             case STATE_MENU:
-                tft.pushImage(0, 0, BG_WIDTH, BG_HEIGHT, bgCurrent);
+                //tft.pushImage(0, 0, BG_WIDTH, BG_HEIGHT, bgCurrent);
                 if ((now / 700) % 2 == 0)
-                    drawImageFromPSRAM(PRESS_FILE, 40, 120, PRESS_WIDTH, PRESS_HEIGHT);
+                    drawSpriteFromPSRAM(PRESS_FILE, 40, 120, PRESS_WIDTH, PRESS_HEIGHT);
                 if (input.encoderPressed) {
                     changeState(STATE_PLAY);
                     //playRandomTrack(mainTracks, 5);
@@ -873,14 +986,14 @@ void loop() {
                 
                 // Анимация названия
                 if ((currentTime / 1000) % 2 == 0) {
-                    drawImageFromPSRAM(NAME1_FILE, 5, 20, NAME_WIDTH, NAME_HEIGHT);
+                    drawSpriteFromPSRAM(NAME1_FILE, 5, 20, NAME_WIDTH, NAME_HEIGHT);
                 } else {
-                    drawImageFromPSRAM(NAME2_FILE, 5, 20, NAME_WIDTH, NAME_HEIGHT);
+                    drawSpriteFromPSRAM(NAME2_FILE, 5, 20, NAME_WIDTH, NAME_HEIGHT);
                 }
                 
                 // Мигающая надпись
                 if ((currentTime / 500) % 2 == 0) {
-                    drawImageFromPSRAM(PRESS_FILE, 40, 120, PRESS_WIDTH, PRESS_HEIGHT);
+                    drawSpriteFromPSRAM(PRESS_FILE, 40, 120, PRESS_WIDTH, PRESS_HEIGHT);
                     digitalWrite(LED_PIN, HIGH);
                 } else {
                     digitalWrite(LED_PIN, LOW);
