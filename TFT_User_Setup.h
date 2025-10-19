@@ -1,6 +1,6 @@
 #define ST7735_DRIVER       // Выбираем драйвер
 
-#define TFT_TRANSPARENT_COLOR 0xF81F
+#define TFT_RGB_ORDER TFT_BGR
 
 #define TFT_WIDTH  128
 #define TFT_HEIGHT 160

@@ -6,7 +6,6 @@
 #include <cmath>
 #include <vector>
 
-
 // ==================== КОНСТАНТЫ ПИНОВ ====================
 constexpr uint8_t ENCODER_CLK = 32;
 constexpr uint8_t ENCODER_DT = 33;
@@ -22,6 +21,7 @@ constexpr uint8_t LED_PIN = 27;
 // ==================== КОНСТАНТЫ ЭКРАНА ====================
 constexpr int16_t SCREEN_WIDTH = 128;
 constexpr int16_t SCREEN_HEIGHT = 160;
+#define TFT_TRANSPARENT_COLOR 0xF81F
 
 // ==================== КОНСТАНТЫ ПУТЕЙ ФАЙЛОВ ====================
 constexpr const char* HIGHSCORE_FILE = "/highscore.txt";
@@ -130,17 +130,18 @@ constexpr float SHIP_SPEED = 1.0f;
 constexpr float BULLET_SPEED = 4.0f;
 constexpr float ASTEROID_BASE_SPEED = 1.0f;
 constexpr float COMET_SPEED_MULTIPLIER = 1.5f;
-constexpr uint32_t LOGO_DISPLAY_TIME = 20000;
+constexpr uint32_t LOGO_DISPLAY_TIME = 2000;
 constexpr unsigned long DEBOUNCE_MS = 50;
-
-#define TFT_TRANSPARENT_COLOR 0xF81F
 
 // ==================== СТРУКТУРЫ И ПЕРЕЧИСЛЕНИЯ ====================
 struct Entity {
-    float x, y;
-    float vx, vy;
-    bool active;
-    int oldX, oldY;
+    float x, y;           // Позиция центра
+    float vx, vy;         // Скорость
+    bool active;          // Существует ли объект
+    int oldX, oldY;       // Предыдущая позиция (для стирания)
+    bool visible;         // Нужно ли рисовать
+    int width, height;    // Размер спрайта
+    const char* sprite;   // Имя файла спрайта
 };
 
 struct Ship {
@@ -211,9 +212,11 @@ volatile int lastEncoderARaw = 0;
 uint16_t shipBgBackup[SHIP_WIDTH * SHIP_HEIGHT];
 int lastShipX = -100, lastShipY = -100;
 
+static bool firstFrameInPlay = true;
 
 // ===== GLOBAL BACKGROUND DATA =====
-uint16_t* bgBuffer = nullptr;      // буфер текущего фона в PSRAM
+//uint16_t* rowBuf = nullptr;      // буфер текущего фона в PSRAM
+static uint16_t rowBuf[128];
 uint16_t* bgStart = nullptr;       // фон стартового меню
 uint16_t* bgMain = nullptr;        // фон основной игры
 uint16_t* bgGameOver = nullptr;    // фон экрана Game Over
@@ -300,7 +303,6 @@ void writeHighScore(int score) {
 }
 
 // ==================== ФУНКЦИИ ОТРИСОВКИ ====================
-
 static inline void drawSpriteFromPSRAM(const char* filename, int x, int y, int w, int h,
                                        uint16_t* bgPtr = nullptr, int bgW = BG_WIDTH, int bgH = BG_HEIGHT) {
     // Получаем спрайт из кеша (в PSRAM, RGB565)
@@ -370,45 +372,63 @@ static inline void drawSpriteFromPSRAM(const char* filename, int x, int y, int w
     }
 }
 
-/*static inline void drawSpriteFromPSRAM(const char* filename, int x, int y, int w, int h) {
-    size_t size = 0;
-    uint16_t* data = (uint16_t*)getSpriteFromCache(filename, size);
-    if (!data) return;
-    tft.pushImage(x, y, w, h, data, (uint16_t)TFT_TRANSPARENT_COLOR);
-}*/
-//временная отрисовка по пикселям для дебага
-/*static void drawSpriteFromPSRAM(const char* filename, int x, int y, int w, int h)
-{
-    size_t size = 0;
-    uint16_t* data = (uint16_t*)getSpriteFromCache(filename, size);
-    if (!data || size < w * h) {
-        Serial.printf("[DEBUG] Sprite %s not found or size mismatch\n", filename);
-        return;
-    }
-
-    for (int j = 0; j < h; j++) {
-        for (int i = 0; i < w; i++) {
-            uint16_t color = data[j * w + i];
-            if (color != TFT_TRANSPARENT_COLOR) {
-                tft.drawPixel(x + i, y + j, color);
-            }
-        }
-    }
-
-    Serial.printf("[DEBUG] Sprite %s drawn at (%d,%d) size %dx%d\n", filename, x, y, w, h);
-}*/
-
-
-void saveBgArea(int x, int y, int w, int h, uint16_t* buffer) {
+/*void saveBgArea(int x, int y, int w, int h, uint16_t* buffer) {
     for (int i = 0; i < h; i++) {
         memcpy(buffer + i * w, bgBuffer + (y + i) * BG_WIDTH + x, w * 2);
     }
-}
+}*/
 
 void restoreBgArea(int x, int y, int w, int h) {
-  uint16_t* src = bgBuffer + y * BG_WIDTH + x;
-  tft.pushImage(x, y, w, h, src);
+    if (!bgCurrent) return;
+    // ограничение по экрану
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > BG_WIDTH)  w = BG_WIDTH - x;
+    if (y + h > BG_HEIGHT) h = BG_HEIGHT - y;
+    if (w <= 0 || h <= 0) return;
+
+    // Восстановление кусочка фона
+    for (int row = 0; row < h; row++) {
+        memcpy(rowBuf, bgCurrent + (y + row) * BG_WIDTH + x, w * 2);
+        tft.pushImage(x, y + row, w, 1, rowBuf);
+    }
 }
+
+// Восстановить фон под одной сущностью (Entity). width/height передаются в пикселях.
+// entity.oldX/oldY хранят позицию центра или левый верх? У тебя oldX/oldY — были вычислены как int(x) и int(y) — 
+// в отрисовке ты используешь x - width/2, y - height/2. Поэтому здесь рассчитываем левый верх.
+void restoreEntityBg(const Entity &e, int spriteW, int spriteH) {
+    if (!e.active && e.oldX == 0 && e.oldY == 0) return; // ничего не делаем если не было установленно (опционально)
+
+    int x = e.oldX - spriteW / 2;
+    int y = e.oldY - spriteH / 2;
+    restoreBgArea(x, y, spriteW, spriteH);
+}
+
+// Обёртки для конкретных типов:
+void restoreShipBg() {
+    restoreEntityBg(playerShip.base, SHIP_WIDTH, SHIP_HEIGHT);
+}
+
+void restoreBulletsBg() {
+    for (int i = 0; i < MAX_BULLETS; ++i) {
+        if (bullets[i].base.active || bullets[i].base.oldX >= 0) {
+            restoreEntityBg(bullets[i].base, BULLET_WIDTH, BULLET_HEIGHT);
+        }
+    }
+}
+
+void restoreAsteroidsBg() {
+    for (int i = 0; i < MAX_ASTEROIDS; ++i) {
+        if (asteroids[i].base.active || asteroids[i].base.oldX >= 0) {
+            int w = asteroids[i].isComet ? COMET_WIDTH : ASTEROID_WIDTH;
+            int h = asteroids[i].isComet ? COMET_HEIGHT : ASTEROID_HEIGHT;
+            restoreEntityBg(asteroids[i].base, w, h);
+        }
+    }
+}
+
+
 // Вспомогательная функция: восстановить прямоугольник (x,y,w,h) из bgPtr
 void restoreBgAreaFromBG(uint16_t* bgPtr, int bgW, int bgH, int x, int y, int w, int h) {
   if (!bgPtr) return;
@@ -492,43 +512,6 @@ void restoreAreaAndRedrawObjects(uint16_t* bgPtr, int bgW, int bgH,
   }
 }
 
-void drawShipFromPSRAM(int16_t x, int16_t y, int16_t angle, bool boosting, uint8_t boostFrame) {
-    char filename[40];
-
-   /* // Восстановить фон в прошлой позиции корабля
-    if (lastShipX > -50) {
-        restoreBgArea(lastShipX - SHIP_WIDTH/2, lastShipY - SHIP_HEIGHT/2, SHIP_WIDTH, SHIP_HEIGHT);
-    }
-
-    // Сохранить фон под новой позицией
-    saveBgArea(x - SHIP_WIDTH/2, y - SHIP_HEIGHT/2, SHIP_WIDTH, SHIP_HEIGHT, shipBgBackup);
-
-    // Запомнить новую позицию
-    lastShipX = x;
-    lastShipY = y; */
-
-    // нормализация угла
-    int normAngle = angle % 360;
-    if (normAngle < 0) normAngle += 360;
-    normAngle = (normAngle / 10) * 10;
-
-    // имя файла
-    if (boosting) {
-        if (boostFrame > 2) boostFrame = 2;
-        snprintf(filename, sizeof(filename), "/spr_ship_boost_%03d_%d.bin", normAngle, boostFrame + 1);
-    } else {
-        snprintf(filename, sizeof(filename), "/spr_ship_stay_%03d.bin", normAngle);
-    }
-
-    size_t fileSize;
-    uint16_t* sprite = (uint16_t*)getSpriteFromCache(filename, fileSize);
-    if (!sprite) return;
-
-    // рисуем
-    tft.pushImage(x - SHIP_WIDTH/2, y - SHIP_HEIGHT/2, SHIP_WIDTH, SHIP_HEIGHT, sprite, TFT_TRANSPARENT_COLOR);
-}
-
-
 void drawLogo() {
     drawSpriteFromPSRAM(LOGO_FILE, 0, 0, LOGO_WIDTH, LOGO_HEIGHT);
 }
@@ -582,11 +565,68 @@ void drawAsteroid(int16_t x, int16_t y, uint8_t size, bool isComet, uint16_t dir
                    isComet ? COMET_HEIGHT : ASTEROID_HEIGHT);
 }
 
+// Вызывается каждый кадр **перед** движением объектов (или прямо после движения — но логика ниже предполагает
+// что вызываем функцию перед восстановлением старых участков и перед рисованием новых)
+void storeOldPositions() {
+    // Сохраняем предыдущее положение корабля
+    playerShip.base.oldX = (int)playerShip.base.x;
+    playerShip.base.oldY = (int)playerShip.base.y;
+
+    // Сохраняем пули
+    for (int i = 0; i < MAX_BULLETS; ++i) {
+        bullets[i].base.oldX = (int)bullets[i].base.x;
+        bullets[i].base.oldY = (int)bullets[i].base.y;
+    }
+
+    // Сохраняем астероиды
+    for (int i = 0; i < MAX_ASTEROIDS; ++i) {
+        asteroids[i].base.oldX = (int)asteroids[i].base.x;
+        asteroids[i].base.oldY = (int)asteroids[i].base.y;
+    }
+}
+
 void drawScore(uint16_t score) {
     char scoreText[16];
     snprintf(scoreText, sizeof(scoreText), "SCORE: %d", score);
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.drawString(scoreText, 5, 5, 2);
+}
+
+void updateGameGraphics() {
+    if (bgCurrent) {
+        // Быстро нарисуем фон
+        tft.pushImage(0, 0, BG_WIDTH, BG_HEIGHT, bgCurrent);
+    }
+    
+    if (playerShip.base.visible) {
+        drawSpriteFromPSRAM(playerShip.base.sprite, 
+                            (int)playerShip.base.x, 
+                            (int)playerShip.base.y,
+                            playerShip.base.width, 
+                            playerShip.base.height);
+    }
+
+    // 3. Очистить и перерисовать пули
+    for (int i = 0; i < MAX_BULLETS; i++) {
+        if (bullets[i].base.visible) {
+            drawSpriteFromPSRAM(bullets[i].base.sprite,
+                                (int)bullets[i].base.x,
+                                (int)bullets[i].base.y,
+                                bullets[i].base.width,
+                                bullets[i].base.height);
+        }
+    }
+
+    // 4. Очистить и перерисовать астероиды
+    for (int i = 0; i < MAX_ASTEROIDS; i++) {
+        if (asteroids[i].base.visible) {
+            drawSpriteFromPSRAM(asteroids[i].base.sprite,
+                                (int)asteroids[i].base.x,
+                                (int)asteroids[i].base.y,
+                                asteroids[i].base.width,
+                                asteroids[i].base.height);
+        }
+    }
 }
 
 // ==================== АУДИО СИСТЕМА ====================
@@ -722,10 +762,6 @@ InputState getInputState() {
     state.buttonA = (digitalRead(BUTTON_A) == LOW);
     state.buttonB = (digitalRead(BUTTON_B) == LOW);
 
-    // --- Логирование в стиле тестового проекта ---
-    //Serial.printf("Pos: %5d | Angle: %3d° | SW: %d | CLK: %d | DT: %d\n", 
-    //              encoderPos, state.encoderAngle, state.encoderPressed, clkState, dtState);
-
     static bool lastSW = false;
     if (state.encoderPressed && !lastSW) {
         Serial.println(">>> ЭНКОДЕР НАЖАТ!");
@@ -749,13 +785,14 @@ InputState getInputState() {
 // ==================== ИГРОВАЯ ЛОГИКА ====================
 void changeState(GameState newState) {
     currentState = newState;
+    stateStartTime = millis();
     switch (newState) {
+        //case STATE_LOGO: bgCurrent = bgLogo; break; 
         case STATE_MENU: bgCurrent = bgStart; break;
         case STATE_PLAY: bgCurrent = bgMain; break;
         case STATE_GAME_OVER: bgCurrent = bgGameOver; break;
     }
 }
-
 
 void resetGame() {
     playerShip.base.x = SCREEN_WIDTH / 2;
@@ -911,14 +948,13 @@ uint16_t* getSpriteFromCache(const char* name, size_t& outSize) {
   return nullptr;
 }
 
-
 // ==================== ОСНОВНЫЕ ФУНКЦИИ ====================
 void setup() {
     Serial.begin(115200);
     delay(1000);
     tft.init();
     tft.setRotation(0);
-    tft.fillScreen(TFT_BLACK);
+    tft.fillScreen(TFT_BLUE);
     
     pinMode(ENCODER_CLK, INPUT_PULLUP);
     pinMode(ENCODER_DT, INPUT_PULLUP);
@@ -974,6 +1010,9 @@ void loop() {
                 break;
                 
             case STATE_MENU:
+            firstFrameInPlay = true;
+                bgCurrent = bgStart;
+                //storeOldPositions();
                 //tft.pushImage(0, 0, BG_WIDTH, BG_HEIGHT, bgCurrent);
                 if ((now / 700) % 2 == 0)
                     drawSpriteFromPSRAM(PRESS_FILE, 40, 120, PRESS_WIDTH, PRESS_HEIGHT);
@@ -983,27 +1022,35 @@ void loop() {
                 }
                 
                 drawMenuBackground();
-                
+                restoreBgArea(5, 20, NAME_WIDTH, NAME_HEIGHT);
                 // Анимация названия
-                if ((currentTime / 1000) % 2 == 0) {
+                // Показать одну из картинок названия
+                if ((millis() / 1000) % 2 == 0) {
                     drawSpriteFromPSRAM(NAME1_FILE, 5, 20, NAME_WIDTH, NAME_HEIGHT);
                 } else {
                     drawSpriteFromPSRAM(NAME2_FILE, 5, 20, NAME_WIDTH, NAME_HEIGHT);
                 }
                 
                 // Мигающая надпись
-                if ((currentTime / 500) % 2 == 0) {
+                /*if ((currentTime / 500) % 2 == 0) {
                     drawSpriteFromPSRAM(PRESS_FILE, 40, 120, PRESS_WIDTH, PRESS_HEIGHT);
                     digitalWrite(LED_PIN, HIGH);
                 } else {
                     digitalWrite(LED_PIN, LOW);
-                }
+                }*/
                 break;
                 
             case STATE_PLAY:
                 // Обновление игры
 
+if (firstFrameInPlay) {
+        tft.pushImage(0, 0, BG_WIDTH, BG_HEIGHT, bgCurrent); // отрисовка фона
+        firstFrameInPlay = false;
+    }
+
                 bgCurrent = bgMain;
+                // === 1. Сохранить старые позиции перед движением ===
+    storeOldPositions();
 
                 playerShip.rotation = input.encoderAngle;
 
@@ -1072,26 +1119,49 @@ void loop() {
 
                 checkCollisions();
 
-                // Отрисовка игры
-                drawGameBackground();
+                // 3) ВОССТАНОВЛЯЕМ фон там, где раньше были объекты
+                if (!firstFrameInPlay) {
+    restoreShipBg();
+    restoreBulletsBg();
+    restoreAsteroidsBg();
+                }
+
+                /*// Отрисовка игры
+                updateGameGraphics();
                 static uint32_t lastBoostAnimTime = 0;
 if (playerShip.boosting) {
     if (millis() - lastBoostAnimTime > 80) {
         playerShip.boostFrame = (playerShip.boostFrame + 1) % 3;
         lastBoostAnimTime = millis();
     }
-}
+}*/
 
-drawShipFromPSRAM(
+drawShip(
     (int)playerShip.base.x,
     (int)playerShip.base.y,
     playerShip.rotation,
     playerShip.boosting,
     playerShip.boostFrame
 );
+    for (int i = 0; i < MAX_BULLETS; i++) {
+        if (bullets[i].base.active) {
+            float angle = atan2(bullets[i].base.vy, bullets[i].base.vx) * 180.0f / PI;
+            if (angle < 0) angle += 360;
+            drawBullet((int)bullets[i].base.x, (int)bullets[i].base.y, (uint16_t)angle);
+        }
+    }
 
+    for (int i = 0; i < MAX_ASTEROIDS; ++i) {
+        if (asteroids[i].base.active) {
+            float direction = atan2(asteroids[i].base.vy, asteroids[i].base.vx) * 180.0f / PI;
+            if (direction < 0) direction += 360;
+            int w = asteroids[i].isComet ? COMET_WIDTH : ASTEROID_WIDTH;
+            int h = asteroids[i].isComet ? COMET_HEIGHT : ASTEROID_HEIGHT;
+            drawAsteroid((int)asteroids[i].base.x, (int)asteroids[i].base.y, asteroids[i].size, asteroids[i].isComet, (uint16_t)direction);
+        }
+    }
                 
-                for (int i = 0; i < MAX_BULLETS; i++) {
+                /*for (int i = 0; i < MAX_BULLETS; i++) {
                     if (bullets[i].base.active) {
                         float angle = atan2(bullets[i].base.vy, bullets[i].base.vx) * 180 / PI;
                         drawBullet(bullets[i].base.x, bullets[i].base.y, angle);
@@ -1103,19 +1173,31 @@ drawShipFromPSRAM(
                         float direction = atan2(asteroids[i].base.vy, asteroids[i].base.vx) * 180 / PI;
                         drawAsteroid(asteroids[i].base.x, asteroids[i].base.y, asteroids[i].size, asteroids[i].isComet, direction);
                     }
-                }
+                }*/
 
                 drawScore(score);
+
+// обновление анимации boost (оставляем твою логику)
+    static uint32_t lastBoostAnimTime = 0;
+    if (playerShip.boosting) {
+        if (millis() - lastBoostAnimTime > 80) {
+            playerShip.boostFrame = (playerShip.boostFrame + 1) % 3;
+            lastBoostAnimTime = millis();
+        }
+    }
+
+
                 break;
                 
             case STATE_GAME_OVER:
+            firstFrameInPlay = true;
                 if (input.encoderPressed) {
                     resetGame();
                     changeState(STATE_MENU);
                     playRandomTrack(introTracks, 3);
                 }
                 
-                drawGameOverBackground();
+                updateGameGraphics();
                 
                 char scoreText[32];
                 snprintf(scoreText, sizeof(scoreText), "SCORE: %d", score);
@@ -1135,5 +1217,3 @@ drawShipFromPSRAM(
     printStats();
   }
     } 
-/*    delay(1);
-}*/
