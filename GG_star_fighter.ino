@@ -131,7 +131,7 @@ constexpr uint8_t GOTEXT_HEIGHT = 35;
 constexpr uint8_t MAX_BULLETS = 5;
 constexpr uint8_t MAX_ASTEROIDS = 10;
 constexpr uint32_t BULLET_DELAY = 300;
-constexpr float SHIP_SPEED = 1.0f;
+constexpr float SHIP_SPEED = 2.0f;
 constexpr float BULLET_SPEED = 4.0f;
 constexpr float ASTEROID_BASE_SPEED = 1.0f;
 constexpr float COMET_SPEED_MULTIPLIER = 1.5f;
@@ -962,6 +962,7 @@ uint16_t* getSpriteFromCache(const char* name, size_t& outSize) {
 void setup() {
     Serial.begin(115200);
     delay(1000);
+    
     tft.init();
     tft.setRotation(0);
     tft.fillScreen(TFT_BLUE);
