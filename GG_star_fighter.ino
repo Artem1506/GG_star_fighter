@@ -10,7 +10,7 @@
 constexpr uint8_t ENCODER_CLK = 32;
 constexpr uint8_t ENCODER_DT = 33;
 constexpr uint8_t ENCODER_SW = 34;
-constexpr uint8_t BUTTON_A = 2;
+constexpr uint8_t BUTTON_A = 35;
 constexpr uint8_t BUTTON_B = 19;
 constexpr uint8_t I2S_BCK_PIN = 26;
 constexpr uint8_t I2S_WS_PIN = 25;
@@ -254,7 +254,6 @@ void printStats() {
   Serial.printf("FPS: %.2f\n", fps);
   Serial.println("====================");
 }
-
 // ==================== end ====================
 
 // Утилита: пересечение двух осевых bbox (x,y,w,h)
@@ -301,7 +300,6 @@ void writeHighScore(int score) {
 }
 
 // ==================== ФУНКЦИИ ОТРИСОВКИ ====================
-
 bool drawLogoStremed() {
     File file = SD_MMC.open(LOGO_FILE, FILE_READ);
     const int CHUNK_HEIGHT = 4;
@@ -819,6 +817,7 @@ void resetGame() {
 
     activeAsteroids = 0;
     score = 0;
+    delay(50); // маленькая пауза стабилизирует питание дисплея
 }
 
 void spawnAsteroid(bool forceComet = false) {
@@ -1009,7 +1008,6 @@ void loop() {
     InputState input = getInputState();
 
     uint32_t currentTime = millis();
-
         
         switch (currentState) {
             case STATE_MENU:{
@@ -1018,6 +1016,8 @@ void loop() {
                 firstFrameInPlay = false;
             }
                 bgCurrent = bgStart;
+
+                playRandomTrack(introTracks, 3);
 
                 storeOldPositions();
                 //storeOldPositions();
@@ -1054,8 +1054,10 @@ void loop() {
                     digitalWrite(LED_PIN, LOW);
                 }
                 if (input.encoderPressed) {
+                    delay(50);
+                    resetGame();
                     changeState(STATE_PLAY);
-                    //playRandomTrack(mainTracks, 5);
+                    playRandomTrack(mainTracks, 5);
                 }
                 break;
             }  
@@ -1118,6 +1120,7 @@ if (firstFrameInPlay) {
                             bullets[i].base.active = true;
                             bullets[i].spawnTime = currentTime;
                             playerShip.lastShot = currentTime;
+                            //tone(BUZZER_PIN, 300, 300);
                             playSoundEffect(2000, 100);
                             break;
                         }
@@ -1226,9 +1229,10 @@ drawShip(
                     firstFrameInPlay = false;
                 }
                 if (input.encoderPressed) {
-                    resetGame();
+                    //resetGame(); test
+                    delay(50);
                     changeState(STATE_MENU);
-                    playRandomTrack(introTracks, 3);
+                    //playRandomTrack(introTracks, 3);
                 }
                 
                 //updateGameGraphics(); //test-check
