@@ -965,7 +965,7 @@ void setup() {
     
     tft.init();
     tft.setRotation(0);
-    tft.fillScreen(TFT_BLUE);
+    tft.fillScreen(TFT_BLUE); //todo ошибка вывода цветов 
     
     pinMode(ENCODER_CLK, INPUT_PULLUP);
     pinMode(ENCODER_DT, INPUT_PULLUP);
@@ -1018,11 +1018,9 @@ void loop() {
             }
                 bgCurrent = bgStart;
 
-                playRandomTrack(introTracks, 3);
+                //playRandomTrack(introTracks, 3);
 
                 storeOldPositions();
-                //storeOldPositions();
-                //tft.pushImage(0, 0, BG_WIDTH, BG_HEIGHT, bgCurrent);
 
                 // Координаты и размеры логотипа
                 const int nameX = 5, nameY = 20;
@@ -1033,10 +1031,8 @@ void loop() {
                 const int pressW = 60, pressH = 24;
                 // 1) Восстанавливаем фон под логотип
                 restoreBgAreaFromBG(bgStart, BG_WIDTH, BG_HEIGHT, nameX, nameY, nameW, nameH);
-
                 // 2) Восстанавливаем фон под мигающим текстом
                 restoreBgAreaFromBG(bgStart, BG_WIDTH, BG_HEIGHT, pressX, pressY, pressW, pressH);
-
                 // 3) Рисуем логотип
                 if ((millis() / 1000) % 2 == 0) {
                     drawSpriteFromPSRAM(NAME1_FILE, nameX, nameY, nameW, nameH, bgStart, BG_WIDTH, BG_HEIGHT);
@@ -1055,204 +1051,178 @@ void loop() {
                     digitalWrite(LED_PIN, LOW);
                 }
                 if (input.encoderPressed) {
-                    delay(50);
+                    delay(500);
                     resetGame();
                     changeState(STATE_PLAY);
-                    playRandomTrack(mainTracks, 5);
+                    //playRandomTrack(mainTracks, 5);
                 }
                 break;
             }  
             case STATE_PLAY:
-                // Обновление игры
+            if (firstFrameInPlay) {
+            tft.pushImage(0, 0, BG_WIDTH, BG_HEIGHT, bgCurrent); // отрисовка фона
+            firstFrameInPlay = false;
+            }
 
-if (firstFrameInPlay) {
-        tft.pushImage(0, 0, BG_WIDTH, BG_HEIGHT, bgCurrent); // отрисовка фона
-        firstFrameInPlay = false;
-    }
+            bgCurrent = bgMain;
+            // === 1. Сохранить старые позиции перед движением ===
+            storeOldPositions();
 
-                bgCurrent = bgMain;
-                // === 1. Сохранить старые позиции перед движением ===
-    storeOldPositions();
+            playerShip.rotation = input.encoderAngle;
 
-                playerShip.rotation = input.encoderAngle;
+            if (!firstFrameInPlay) {
+                if (input.buttonA) {
+                    float rad = playerShip.rotation * PI / 180.0f;
+                    playerShip.base.vx += cos(rad) * SHIP_SPEED;
+                    playerShip.base.vy += sin(rad) * SHIP_SPEED;
 
-                if (!firstFrameInPlay) {
-                    if (input.buttonA) {
-                        float rad = playerShip.rotation * PI / 180.0f;
-                        playerShip.base.vx += cos(rad) * SHIP_SPEED;
-                        playerShip.base.vy += sin(rad) * SHIP_SPEED;
-
-                        // Ограничиваем скорость по модулю
-                        float speed = sqrt(playerShip.base.vx * playerShip.base.vx + playerShip.base.vy * playerShip.base.vy);
-                        if (speed > SHIP_SPEED) {
-                            playerShip.base.vx = (playerShip.base.vx / speed) * SHIP_SPEED;
-                            playerShip.base.vy = (playerShip.base.vy / speed) * SHIP_SPEED;
-                        }
-
-                        playerShip.boosting = true;
-                    } else {
-                        playerShip.boosting = false;
+                    // Ограничиваем скорость по модулю
+                    float speed = sqrt(playerShip.base.vx * playerShip.base.vx + playerShip.base.vy * playerShip.base.vy);
+                    if (speed > SHIP_SPEED) {
+                        playerShip.base.vx = (playerShip.base.vx / speed) * SHIP_SPEED;
+                        playerShip.base.vy = (playerShip.base.vy / speed) * SHIP_SPEED;
                     }
+
+                    playerShip.boosting = true;
+                } else {
+                    playerShip.boosting = false;
                 }
+            }
 
-                // Движение корабля
-                playerShip.base.x += playerShip.base.vx;
-                playerShip.base.y += playerShip.base.vy;
+            // Движение корабля
+            playerShip.base.x += playerShip.base.vx;
+            playerShip.base.y += playerShip.base.vy;
 
-                // Телепортация
-                if (playerShip.base.x < 0) playerShip.base.x = SCREEN_WIDTH;
-                if (playerShip.base.x > SCREEN_WIDTH) playerShip.base.x = 0;
-                if (playerShip.base.y < 0) playerShip.base.y = SCREEN_HEIGHT;
-                if (playerShip.base.y > SCREEN_HEIGHT) playerShip.base.y = 0;
+            // Телепортация
+            if (playerShip.base.x < 0) playerShip.base.x = SCREEN_WIDTH;
+            if (playerShip.base.x > SCREEN_WIDTH) playerShip.base.x = 0;
+            if (playerShip.base.y < 0) playerShip.base.y = SCREEN_HEIGHT;
+            if (playerShip.base.y > SCREEN_HEIGHT) playerShip.base.y = 0;
 
-                // --- 3. Применяем трение
-                playerShip.base.vx *= 0.95f; // плавное затухание скорости по X
-                playerShip.base.vy *= 0.95f; // плавное затухание скорости по Y
+            // --- 3. Применяем трение
+            playerShip.base.vx *= 0.95f; // плавное затухание скорости по X
+            playerShip.base.vy *= 0.95f; // плавное затухание скорости по Y
 
-                // Стрельба
-                if (input.buttonB && currentTime - playerShip.lastShot > BULLET_DELAY) {
-                    for (int i = 0; i < MAX_BULLETS; i++) {
-                        if (!bullets[i].base.active) {
-                            float rad = playerShip.rotation * PI / 180.0f;
-                            bullets[i].base.x = playerShip.base.x;
-                            bullets[i].base.y = playerShip.base.y;
-                            bullets[i].base.vx = cos(rad) * BULLET_SPEED;
-                            bullets[i].base.vy = sin(rad) * BULLET_SPEED;
-                            bullets[i].base.active = true;
-                            bullets[i].spawnTime = currentTime;
-                            playerShip.lastShot = currentTime;
-                            //tone(BUZZER_PIN, 300, 300);
-                            playSoundEffect(2000, 100);
-                            break;
-                        }
-                    }
-                }
-
-                // Обновление пуль и астероидов
+            // Стрельба
+            if (input.buttonB && currentTime - playerShip.lastShot > BULLET_DELAY) {
                 for (int i = 0; i < MAX_BULLETS; i++) {
-                    if (bullets[i].base.active) {
-                        bullets[i].base.x += bullets[i].base.vx;
-                        bullets[i].base.y += bullets[i].base.vy;
-                        if (currentTime - bullets[i].spawnTime > 2000) bullets[i].base.active = false;
-                    }
-                }
-
-                for (int i = 0; i < MAX_ASTEROIDS; i++) {
-                    if (asteroids[i].base.active) {
-                        asteroids[i].base.x += asteroids[i].base.vx;
-                        asteroids[i].base.y += asteroids[i].base.vy;
+                    if (!bullets[i].base.active) {
+                        float rad = playerShip.rotation * PI / 180.0f;
+                        bullets[i].base.x = playerShip.base.x;
+                        bullets[i].base.y = playerShip.base.y;
+                        bullets[i].base.vx = cos(rad) * BULLET_SPEED;
+                        bullets[i].base.vy = sin(rad) * BULLET_SPEED;
+                        bullets[i].base.active = true;
+                        bullets[i].spawnTime = currentTime;
                         
-                        if (asteroids[i].base.x < -20) asteroids[i].base.x = SCREEN_WIDTH + 20;
-                        if (asteroids[i].base.x > SCREEN_WIDTH + 20) asteroids[i].base.x = -20;
-                        if (asteroids[i].base.y < -20) asteroids[i].base.y = SCREEN_HEIGHT + 20;
-                        if (asteroids[i].base.y > SCREEN_HEIGHT + 20) asteroids[i].base.y = -20;
+                        playerShip.lastShot = currentTime;
+                        //tone(BUZZER_PIN, 300, 300);
+                        playSoundEffect(2000, 100);
+                        break;
                     }
                 }
+            }
 
-                // Спавн астероидов
-                if (activeAsteroids < 1 + (score / 5)) {
-                    spawnAsteroid();
+            // Обновление пуль и астероидов
+            for (int i = 0; i < MAX_BULLETS; i++) {
+                if (bullets[i].base.active) {
+                    bullets[i].base.x += bullets[i].base.vx;
+                    bullets[i].base.y += bullets[i].base.vy;
+                    if (currentTime - bullets[i].spawnTime > 2000) bullets[i].base.active = false;
                 }
+            }
+            for (int i = 0; i < MAX_ASTEROIDS; i++) {
+                if (asteroids[i].base.active) {
+                    asteroids[i].base.x += asteroids[i].base.vx;
+                    asteroids[i].base.y += asteroids[i].base.vy;
 
-                checkCollisions();
-
-                // 3) ВОССТАНОВЛЯЕМ фон там, где раньше были объекты
-                if (!firstFrameInPlay) {
-    restoreShipBg();
-    restoreBulletsBg();
-    restoreAsteroidsBg();
+                    if (asteroids[i].base.x < -20) asteroids[i].base.x = SCREEN_WIDTH + 20;
+                    if (asteroids[i].base.x > SCREEN_WIDTH + 20) asteroids[i].base.x = -20;
+                    if (asteroids[i].base.y < -20) asteroids[i].base.y = SCREEN_HEIGHT + 20;
+                    if (asteroids[i].base.y > SCREEN_HEIGHT + 20) asteroids[i].base.y = -20;
                 }
+            }
 
-                /*// Отрисовка игры
-                updateGameGraphics();
-                static uint32_t lastBoostAnimTime = 0;
-if (playerShip.boosting) {
-    if (millis() - lastBoostAnimTime > 80) {
-        playerShip.boostFrame = (playerShip.boostFrame + 1) % 3;
-        lastBoostAnimTime = millis();
-    }
-}*/
+            // Спавн астероидов
+            if (activeAsteroids < 1 + (score / 5)) {
+                spawnAsteroid();
+            }
 
-drawShip(
-    (int)playerShip.base.x,
-    (int)playerShip.base.y,
-    playerShip.rotation,
-    playerShip.boosting,
-    playerShip.boostFrame
-);
-    for (int i = 0; i < MAX_BULLETS; i++) {
-        if (bullets[i].base.active) {
-            float angle = atan2(bullets[i].base.vy, bullets[i].base.vx) * 180.0f / PI;
-            if (angle < 0) angle += 360;
-            drawBullet((int)bullets[i].base.x, (int)bullets[i].base.y, (uint16_t)angle);
+            checkCollisions();
+
+            // 3) ВОССТАНОВЛЯЕМ фон там, где раньше были объекты
+            if (!firstFrameInPlay) {
+                restoreShipBg();
+                restoreBulletsBg();
+                restoreAsteroidsBg();
+            }
+
+            drawShip(
+            (int)playerShip.base.x,
+            (int)playerShip.base.y,
+            playerShip.rotation,
+            playerShip.boosting,
+            playerShip.boostFrame);
+
+            for (int i = 0; i < MAX_BULLETS; i++) {
+            if (bullets[i].base.active) {
+                float angle = atan2(bullets[i].base.vy, bullets[i].base.vx) * 180.0f / PI;
+                if (angle < 0) angle += 360;
+                drawBullet((int)bullets[i].base.x, (int)bullets[i].base.y, (uint16_t)angle);
+            }
         }
-    }
 
-    for (int i = 0; i < MAX_ASTEROIDS; ++i) {
-        if (asteroids[i].base.active) {
-            float direction = atan2(asteroids[i].base.vy, asteroids[i].base.vx) * 180.0f / PI;
-            if (direction < 0) direction += 360;
-            int w = asteroids[i].isComet ? COMET_WIDTH : ASTEROID_WIDTH;
-            int h = asteroids[i].isComet ? COMET_HEIGHT : ASTEROID_HEIGHT;
-            drawAsteroid((int)asteroids[i].base.x, (int)asteroids[i].base.y, asteroids[i].size, asteroids[i].isComet, (uint16_t)direction);
+        for (int i = 0; i < MAX_ASTEROIDS; ++i) {
+            if (asteroids[i].base.active) {
+                float direction = atan2(asteroids[i].base.vy, asteroids[i].base.vx) * 180.0f / PI;
+                if (direction < 0) direction += 360;
+                int w = asteroids[i].isComet ? COMET_WIDTH : ASTEROID_WIDTH;
+                int h = asteroids[i].isComet ? COMET_HEIGHT : ASTEROID_HEIGHT;
+                drawAsteroid((int)asteroids[i].base.x, (int)asteroids[i].base.y, asteroids[i].size, asteroids[i].isComet, (uint16_t)direction);
+            }
         }
-    }
+
+        drawScore(score);
+
+        // обновление анимации boost (оставляем твою логику)
+        static uint32_t lastBoostAnimTime = 0;
+        if (playerShip.boosting) {
+            if (millis() - lastBoostAnimTime > 80) {
+                playerShip.boostFrame = (playerShip.boostFrame + 1) % 3;
+                lastBoostAnimTime = millis();
+            }
+        }
+        break;
                 
-                /*for (int i = 0; i < MAX_BULLETS; i++) {
-                    if (bullets[i].base.active) {
-                        float angle = atan2(bullets[i].base.vy, bullets[i].base.vx) * 180 / PI;
-                        drawBullet(bullets[i].base.x, bullets[i].base.y, angle);
-                    }
-                }
-
-                for (int i = 0; i < MAX_ASTEROIDS; i++) {
-                    if (asteroids[i].base.active) {
-                        float direction = atan2(asteroids[i].base.vy, asteroids[i].base.vx) * 180 / PI;
-                        drawAsteroid(asteroids[i].base.x, asteroids[i].base.y, asteroids[i].size, asteroids[i].isComet, direction);
-                    }
-                }*/
-
-                drawScore(score);
-
-// обновление анимации boost (оставляем твою логику)
-    static uint32_t lastBoostAnimTime = 0;
-    if (playerShip.boosting) {
-        if (millis() - lastBoostAnimTime > 80) {
-            playerShip.boostFrame = (playerShip.boostFrame + 1) % 3;
-            lastBoostAnimTime = millis();
-        }
-    }
-                break;
-                
-            case STATE_GAME_OVER:
-                if (firstFrameInPlay) {
-                    tft.pushImage(0, 0, BG_WIDTH, BG_HEIGHT, bgCurrent); // отрисовка фона
-                    firstFrameInPlay = false;
-                }
-                if (input.encoderPressed) {
+        case STATE_GAME_OVER:
+            if (firstFrameInPlay) {
+                tft.pushImage(0, 0, BG_WIDTH, BG_HEIGHT, bgCurrent); // отрисовка фона
+                firstFrameInPlay = false;
+            }
+            if (input.encoderPressed) {
                     //resetGame(); test
-                    delay(50);
+                    delay(500);
                     changeState(STATE_MENU);
                     //playRandomTrack(introTracks, 3);
-                }
+            }
                 
-                //updateGameGraphics(); //test-check
+            //updateGameGraphics(); //test-check
                 
-                char scoreText[32];
-                snprintf(scoreText, sizeof(scoreText), "SCORE: %d", score);
-                tft.drawString(scoreText, SCREEN_WIDTH/2 - 30, SCREEN_HEIGHT/2 - 10, 2);
+            char scoreText[32];
+            snprintf(scoreText, sizeof(scoreText), "SCORE: %d", score);
+            tft.drawString(scoreText, SCREEN_WIDTH/2 - 30, SCREEN_HEIGHT/2 - 10, 2);
                 
-                snprintf(scoreText, sizeof(scoreText), "BEST: %d", highScore);
-                tft.drawString(scoreText, SCREEN_WIDTH/2 - 25, SCREEN_HEIGHT/2 + 10, 2);
-                break;
-        }
+            snprintf(scoreText, sizeof(scoreText), "BEST: %d", highScore);
+            tft.drawString(scoreText, SCREEN_WIDTH/2 - 25, SCREEN_HEIGHT/2 + 10, 2);
+            break;
+    }
         
-        frameCount++;
+    frameCount++;
 
-  // Каждые 5 секунд печатаем статистику
-  //unsigned long now = millis();
-  if (now - lastStatsTime >= 5000) {
-    lastStatsTime = now;
-    printStats();
-  }
-    } 
+    // Каждые 5 секунд печатаем статистику
+    //unsigned long now = millis();
+    if (now - lastStatsTime >= 5000) {
+        lastStatsTime = now;
+        printStats();
+    }
+}
