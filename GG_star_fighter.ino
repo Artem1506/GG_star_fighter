@@ -102,8 +102,14 @@ constexpr const char* COMET_FILES[36] = {
     "/spr_comet_320.bin", "/spr_comet_330.bin", "/spr_comet_340.bin", "/spr_comet_350.bin"
 };
 constexpr const char* ASTEROID_FILE = "/spr_asteroid_1.bin";
-constexpr const char* BOOM_BIG_FILE = "/spr_boom_big1.bin";
-constexpr const char* BOOM_SMALL_FILE = "/spr_boom_small1.bin";
+constexpr const char* BOOM_BIG_FILES[13] = { "/spr_boom_big1.bin", 
+    "/spr_boom_big2.bin", "/spr_boom_big3.bin", "/spr_boom_big4.bin", "/spr_boom_big5.bin", 
+    "/spr_boom_big6.bin", "/spr_boom_big7.bin", "/spr_boom_big8.bin", "/spr_boom_big9.bin", 
+    "/spr_boom_big10.bin", "/spr_boom_big11.bin", "/spr_boom_big12.bin", "/spr_boom_big13.bin"
+};
+constexpr const char* BOOM_SMALL_FILES[5] = {
+    "/spr_boom_small1.bin", "/spr_boom_small2.bin", "/spr_boom_small3.bin", "/spr_boom_small4.bin", "/spr_boom_small5.bin"
+};
 constexpr const char* GAMEOVER_BG_FILE = "/spr_GO_BG.bin";
 constexpr const char* GAMEOVER_TEXT_FILE = "/spr_GO_text.bin";
 
@@ -130,6 +136,7 @@ constexpr uint8_t GOTEXT_HEIGHT = 35;
 // ==================== КОНСТАНТЫ ИГРЫ ====================
 constexpr uint8_t MAX_BULLETS = 5;
 constexpr uint8_t MAX_ASTEROIDS = 10;
+constexpr uint8_t MAX_EXPLOSIONS = 10;
 constexpr uint32_t BULLET_DELAY = 300;
 constexpr float SHIP_SPEED = 2.0f;
 constexpr float BULLET_SPEED = 4.0f;
@@ -168,6 +175,13 @@ struct Asteroid {
     bool isComet;
 };
 
+struct Explosion {
+    bool active;
+    float x, y;
+    uint8_t frame;
+    uint32_t lastFrameTime;
+};
+
 struct WavInfo {
     uint32_t dataPos;
     uint32_t dataLen;
@@ -204,6 +218,7 @@ uint32_t lastFrameTime = 0;
 Ship playerShip;
 Bullet bullets[5];
 Asteroid asteroids[10];
+Explosion explosions[MAX_EXPLOSIONS];
 int score = 0;
 int highScore = 0;
 uint8_t activeAsteroids = 0;
@@ -572,6 +587,20 @@ void drawAsteroid(int16_t x, int16_t y, uint8_t size, bool isComet, uint16_t dir
                    isComet ? COMET_HEIGHT : ASTEROID_HEIGHT);
 }
 
+void drawExplosions() {
+    for (int i = 0; i < MAX_EXPLOSIONS; i++) {
+        if (!explosions[i].active) continue;
+
+        int x = (int)explosions[i].x - BOOMSMALL_WIDTH / 2;
+        int y = (int)explosions[i].y - BOOMSMALL_HEIGHT / 2;
+
+        restoreBgAreaFromBG(bgMain, BG_WIDTH, BG_HEIGHT, x, y, BOOMSMALL_WIDTH, BOOMSMALL_HEIGHT);
+
+        // Рисуем текущий кадр анимации
+        drawSpriteFromPSRAM(BOOM_SMALL_FILES[explosions[i].frame], x, y, BOOMSMALL_WIDTH, BOOMSMALL_HEIGHT);
+    }
+}
+
 // Вызывается каждый кадр **перед** движением объектов (или прямо после движения — но логика ниже предполагает
 // что вызываем функцию перед восстановлением старых участков и перед рисованием новых)
 void storeOldPositions() {
@@ -853,6 +882,35 @@ void spawnAsteroid(bool forceComet = false) {
     }
 }
 
+void spawnExplosion(float x, float y) {
+    for (int i = 0; i < MAX_EXPLOSIONS; i++) {
+        if (!explosions[i].active) {
+            explosions[i].active = true;
+            explosions[i].x = x;
+            explosions[i].y = y;
+            explosions[i].frame = 0;
+            explosions[i].lastFrameTime = millis();
+            return;
+        }
+    }
+}
+
+void updateExplosions() {
+    uint32_t now = millis();
+    for (int i = 0; i < MAX_EXPLOSIONS; i++) {
+        if (!explosions[i].active) continue;
+
+        if (now - explosions[i].lastFrameTime > 80) { // задержка между кадрами
+            explosions[i].frame++;
+            explosions[i].lastFrameTime = now;
+
+            if (explosions[i].frame >= 5) {
+                explosions[i].active = false; // завершена анимация
+            }
+        }
+    }
+}
+
 void checkCollisions() {
     // Пули -> Астероиды
     for (int b = 0; b < MAX_BULLETS; b++) {
@@ -868,6 +926,7 @@ void checkCollisions() {
             if (distanceSq < 64.0f) {
                 bullets[b].base.active = false;
                 asteroids[a].base.active = false;
+                spawnExplosion(asteroids[a].base.x, asteroids[a].base.y); //взрыв
                 activeAsteroids--;
                 score++;
                 playSoundEffect(400, 150);
@@ -932,7 +991,7 @@ void loadAllSpritesToPSRAM() {
     const char* files[] = {
         START_BG_FILE, MAIN_BG_FILE, GAMEOVER_BG_FILE,
         NAME1_FILE, NAME2_FILE, ASTEROID_FILE,
-        BOOM_BIG_FILE, BOOM_SMALL_FILE
+        BOOM_BIG_FILE
     };
 
     for (auto file : files) loadFileToPSRAM(file);
@@ -944,6 +1003,9 @@ void loadAllSpritesToPSRAM() {
         loadFileToPSRAM(COMET_FILES[i]);
         for (int f = 0; f < 3; f++)
             loadFileToPSRAM(SHIP_BOOST_FILES[i][f]);
+    }
+    for (int i = 0; i < 5; i++) {
+        loadFileToPSRAM(BOOM_SMALL_FILES[i]);
     }
 }
 
@@ -1143,6 +1205,9 @@ void loop() {
                 }
             }
 
+            // Обновление анимаций взрывов
+            updateExplosions();
+
             // Спавн астероидов
             if (activeAsteroids < 1 + (score / 5)) {
                 spawnAsteroid();
@@ -1179,6 +1244,23 @@ void loop() {
                 int w = asteroids[i].isComet ? COMET_WIDTH : ASTEROID_WIDTH;
                 int h = asteroids[i].isComet ? COMET_HEIGHT : ASTEROID_HEIGHT;
                 drawAsteroid((int)asteroids[i].base.x, (int)asteroids[i].base.y, asteroids[i].size, asteroids[i].isComet, (uint16_t)direction);
+            }
+        }
+
+        // Отрисовка активных взрывов
+        drawExplosions();
+
+        for (int i = 0; i < MAX_EXPLOSIONS; i++) {
+            if (explosions[i].active) {
+                // Воспроизводим кадры с интервалом 10мс
+                if (millis() - explosions[i].lastFrameTime > 10) {
+                    explosions[i].frame++;
+                    explosions[i].lastFrameTime = millis();
+                    if (explosions[i].frame >= 5) {
+                        explosions[i].active = false;
+                        continue;
+                    }
+                }
             }
         }
 
