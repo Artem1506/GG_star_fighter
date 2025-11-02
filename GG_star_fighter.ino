@@ -21,10 +21,16 @@ constexpr uint8_t LED_PIN = 27;
 // ==================== КОНСТАНТЫ ЭКРАНА ====================
 constexpr int16_t SCREEN_WIDTH = 128;
 constexpr int16_t SCREEN_HEIGHT = 160;
-#define TFT_TRANSPARENT_COLOR 0xF81F
+#define TFT_TRANSPARENT_COLOR 0x1FF8
 
 // ==================== КОНСТАНТЫ ПУТЕЙ ФАЙЛОВ ====================
 constexpr const char* HIGHSCORE_FILE = "/highscore.txt";
+constexpr const char* introTracks[3] = {
+    "/snd_intro1.wav", "/snd_intro2.wav", "/snd_intro3.wav"};
+constexpr const char* mainTracks[5] = {
+    "/snd_main1.wav", "/snd_main2.wav", "/snd_main3.wav", "/snd_main4.wav", "/snd_main5.wav"};
+constexpr const char* gameOverTracks[3] = {
+    "/snd_gameover1.wav", "/snd_gameover2.wav", "/snd_gameover3.wav"};
 constexpr const char* LOGO_FILE = "/spr_GG_logo.bin";
 constexpr const char* START_BG_FILE = "/spr_start_BG.bin";
 constexpr const char* NAME1_FILE = "/spr_main_name.bin";
@@ -137,6 +143,7 @@ constexpr uint8_t GOTEXT_HEIGHT = 35;
 constexpr uint8_t MAX_BULLETS = 5;
 constexpr uint8_t MAX_ASTEROIDS = 10;
 constexpr uint8_t MAX_EXPLOSIONS = 10;
+constexpr uint8_t ANIMATION_SPEED = 50;
 constexpr uint32_t BULLET_DELAY = 300;
 constexpr float SHIP_SPEED = 2.0f;
 constexpr float BULLET_SPEED = 4.0f;
@@ -178,8 +185,11 @@ struct Asteroid {
 struct Explosion {
     bool active;
     float x, y;
+    int oldX, oldY;
     uint8_t frame;
     uint32_t lastFrameTime;
+    bool isPlayer;
+    bool isBig;
 };
 
 struct WavInfo {
@@ -219,6 +229,7 @@ Ship playerShip;
 Bullet bullets[5];
 Asteroid asteroids[10];
 Explosion explosions[MAX_EXPLOSIONS];
+bool playerExploding = false; // true когда запущен взрыв корабля
 int score = 0;
 int highScore = 0;
 uint8_t activeAsteroids = 0;
@@ -237,6 +248,16 @@ size_t bgSizeStart = 0;
 size_t bgSizeMain = 0;
 size_t bgSizeGameOver = 0;
 uint16_t* bgCurrent = nullptr;     // указатель на активный фон
+
+// =============  TOOLS ========
+// Обмен байт в place: делает swap16 для массива uint16_t длиной count
+static inline void swap16Buffer(uint16_t* data, size_t count) {
+    for (size_t i = 0; i < count; ++i) {
+        uint16_t v = data[i];
+        data[i] = (v >> 8) | (v << 8);
+    }
+}
+
 
 // ==================== Мониторинг ресурсов ====================
 unsigned long lastStatsTime = 0;
@@ -268,12 +289,6 @@ void printStats() {
   Serial.printf("PSRAM: %u / %u bytes free\n", freePsram, psramSize);
   Serial.printf("FPS: %.2f\n", fps);
   Serial.println("====================");
-}
-// ==================== end ====================
-
-// Утилита: пересечение двух осевых bbox (x,y,w,h)
-bool rectsIntersect(int x1, int y1, int w1, int h1, int x2, int y2, int w2, int h2) {
-  return !(x2 >= x1 + w1 || x2 + w2 <= x1 || y2 >= y1 + h1 || y2 + h2 <= y1);
 }
 
 // ==================== ФУНКЦИИ SD-КАРТЫ ====================
@@ -314,6 +329,73 @@ void writeHighScore(int score) {
     }
 }
 
+// ==================== КЭШ СПРАЙТОВ В PSRAM ====================
+std::vector<SpriteData> spriteCache;
+
+void loadFileToPSRAM(const char* filename) {
+    File f = SD_MMC.open(filename, FILE_READ);
+    if (!f) {
+        Serial.printf("[ERR] Не найден файл %s\n", filename);
+        return;
+    }
+    size_t sz = f.size();
+    uint8_t* buf = (uint8_t*)malloc(sz);;
+    if (!buf) {
+        Serial.printf("[ERR] Нет памяти для %s\n", filename);
+        f.close();
+        return;
+    }
+    f.read(buf, sz);
+    f.close();
+
+    uint16_t* pixels = reinterpret_cast<uint16_t*>(buf);
+    size_t pixelCount = sz / 2;
+    swap16Buffer(pixels, pixelCount);
+
+    SpriteData entry;
+    entry.name = String(filename);
+    entry.data = reinterpret_cast<uint16_t*>(buf);
+    entry.size = sz / 2; // количество пикселей
+    spriteCache.push_back(entry);
+    Serial.printf("[OK] Загружен %s (%u байт, %u пикселей)\n", filename, sz, entry.size);
+}
+
+// Загружаем все спрайты в PSRAM
+void loadAllSpritesToPSRAM() {
+    const char* files[] = {
+        START_BG_FILE, MAIN_BG_FILE, GAMEOVER_BG_FILE,
+        NAME1_FILE, NAME2_FILE, ASTEROID_FILE
+    };
+
+    for (auto file : files) loadFileToPSRAM(file);
+
+    // Загружаем массивы
+    for (int i = 0; i < 36; i++) {
+        loadFileToPSRAM(SHIP_STAY_FILES[i]);
+        loadFileToPSRAM(BULLET_FILES[i]);
+        loadFileToPSRAM(COMET_FILES[i]);
+        for (int f = 0; f < 3; f++)
+            loadFileToPSRAM(SHIP_BOOST_FILES[i][f]);
+    }
+    for (int i = 0; i < 5; i++) {
+        loadFileToPSRAM(BOOM_SMALL_FILES[i]);
+    }
+    for (int i = 0; i < 13; ++i) {
+        loadFileToPSRAM(BOOM_BIG_FILES[i]);
+    }
+}
+
+// Поиск спрайта в кеше
+uint16_t* getSpriteFromCache(const char* name, size_t& outSize) {
+  for (auto &s : spriteCache) {
+    if (s.name.equals(name)) {
+      outSize = s.size;
+      return s.data;
+    }
+  }
+  return nullptr;
+}
+
 // ==================== ФУНКЦИИ ОТРИСОВКИ ====================
 bool drawLogoStremed() {
     File file = SD_MMC.open(LOGO_FILE, FILE_READ);
@@ -325,11 +407,13 @@ bool drawLogoStremed() {
         
         // Читаем чанк из файла
         size_t bytesRead = file.read((uint8_t*)chunkBuffer, chunkSize);
-
+        for (int i = 0; i < (bytesRead / 2); i++) {
+            uint16_t v = chunkBuffer[i];
+            chunkBuffer[i] = (v >> 8) | (v << 8);
+        }
         tft.pushImage(0, y, BG_WIDTH, currentChunkHeight, chunkBuffer);
     }
     file.close();
-    Serial.println("[OK] Логотип отображен");
     return true;
 }
 
@@ -419,10 +503,7 @@ void restoreBgArea(int x, int y, int w, int h) {
 }
 
 // Восстановить фон под одной сущностью (Entity). width/height передаются в пикселях.
-// entity.oldX/oldY хранят позицию центра или левый верх? У тебя oldX/oldY — были вычислены как int(x) и int(y) — 
-// в отрисовке ты используешь x - width/2, y - height/2. Поэтому здесь рассчитываем левый верх.
 void restoreEntityBg(const Entity &e, int spriteW, int spriteH) {
-    //if (!e.active && e.oldX == 0 && e.oldY == 0) return; // ничего не делаем если не было установленно (опционально) test
 
     int x = e.oldX - spriteW / 2;
     int y = e.oldY - spriteH / 2;
@@ -433,7 +514,6 @@ void restoreEntityBg(const Entity &e, int spriteW, int spriteH) {
 void restoreShipBg() {
     restoreEntityBg(playerShip.base, SHIP_WIDTH, SHIP_HEIGHT);
 }
-
 void restoreBulletsBg() {
     for (int i = 0; i < MAX_BULLETS; ++i) {
         if (bullets[i].base.active || bullets[i].base.oldX >= 0) {
@@ -441,7 +521,6 @@ void restoreBulletsBg() {
         }
     }
 }
-
 void restoreAsteroidsBg() {
     for (int i = 0; i < MAX_ASTEROIDS; ++i) {
         if (asteroids[i].base.active || asteroids[i].base.oldX >= 0) {
@@ -451,10 +530,26 @@ void restoreAsteroidsBg() {
         }
     }
 }
-
+void restoreExplosionsBg() {
+    for (int i = 0; i < MAX_EXPLOSIONS; ++i) {
+        if (explosions[i].active) {
+            int w = explosions[i].isBig ? BOOMBIG_WIDTH : BOOMSMALL_WIDTH;
+            int h = explosions[i].isBig ? BOOMBIG_HEIGHT : BOOMSMALL_HEIGHT;
+            //Entity e; test
+            //e.oldX = explosions[i].x;
+            //e.oldY = explosions[i].y;
+            //restoreEntityBg(explosions[i], w, h); //test1
+            explosions[i].oldX = explosions[i].x;
+            explosions[i].oldY = explosions[i].y;
+            int x = explosions[i].x - w / 2;
+            int y = explosions[i].y - h / 2;
+            restoreBgArea(x, y, w, h);
+        }
+    }
+}
 
 // Вспомогательная функция: восстановить прямоугольник (x,y,w,h) из bgPtr
-void restoreBgAreaFromBG(uint16_t* bgPtr, int bgW, int bgH, int x, int y, int w, int h) {
+/*void restoreBgAreaFromBG(uint16_t* bgPtr, int bgW, int bgH, int x, int y, int w, int h) {
   if (!bgPtr) return;
   // Клиппинг
   if (x < 0) { w += x; x = 0; }
@@ -468,87 +563,7 @@ void restoreBgAreaFromBG(uint16_t* bgPtr, int bgW, int bgH, int x, int y, int w,
   uint16_t* src = bgPtr + y * bgW + x;
   // Отправляем весь прямоугольник одним pushImage
   tft.pushImage(x, y, w, h, src);
-}
-
-// Главная функция: восстановить область и перерисовать объекты, пересекающиеся с ней
-// bgPtr/bgW/bgH - указатель и размеры текущего фонового изображения (например bgMain)
-void restoreAreaAndRedrawObjects(uint16_t* bgPtr, int bgW, int bgH,
-                                 int rx, int ry, int rw, int rh) {
-  if (!bgPtr) return;
-
-  // 1) Восстанавливаем фон в заданной зоне
-  restoreBgAreaFromBG(bgPtr, bgW, bgH, rx, ry, rw, rh);
-
-  // 2) Перерисуем все объекты, чьи current bbox пересекаются с этой зоной.
-  //    Порядок перерисовки отражает z-order: сначала астероиды, потом пули, затем корабль.
-  char nameBuf[64];
-
-  // ASTEROIDS
-  for (int i = 0; i < MAX_ASTEROIDS; i++) {
-    if (!asteroids[i].base.active) continue;
-    int ax = (int)asteroids[i].base.x - (ASTEROID_WIDTH / 2);
-    int ay = (int)asteroids[i].base.y - (ASTEROID_HEIGHT / 2);
-    int aw = asteroids[i].isComet ? COMET_WIDTH : ASTEROID_WIDTH;
-    int ah = asteroids[i].isComet ? COMET_HEIGHT : ASTEROID_HEIGHT;
-
-    if (rectsIntersect(rx, ry, rw, rh, ax, ay, aw, ah)) {
-      if (asteroids[i].isComet) {
-        float dirf = atan2(asteroids[i].base.vy, asteroids[i].base.vx) * 180.0f / PI;
-        int dir = (int)dirf;
-        if (dir < 0) dir += 360;
-        int norm = (dir / 10) * 10;
-        snprintf(nameBuf, sizeof(nameBuf), "/spr_comet_%03d.bin", norm);
-        drawSpriteFromPSRAM(nameBuf, ax, ay, COMET_WIDTH, COMET_HEIGHT);
-      } else {
-        drawSpriteFromPSRAM(ASTEROID_FILE, ax, ay, ASTEROID_WIDTH, ASTEROID_HEIGHT);
-      }
-    }
-  }
-
-  // BULLETS
-  for (int i = 0; i < MAX_BULLETS; i++) {
-    if (!bullets[i].base.active) continue;
-    int bx = (int)bullets[i].base.x - (BULLET_WIDTH / 2);
-    int by = (int)bullets[i].base.y - (BULLET_HEIGHT / 2);
-    if (rectsIntersect(rx, ry, rw, rh, bx, by, BULLET_WIDTH, BULLET_HEIGHT)) {
-      float angle = atan2(bullets[i].base.vy, bullets[i].base.vx) * 180.0f / PI;
-      int ang = (int)angle;
-      if (ang < 0) ang += 360;
-      int norm = (ang / 10) * 10;
-      snprintf(nameBuf, sizeof(nameBuf), "/spr_bullet_%03d.bin", norm);
-      drawSpriteFromPSRAM(nameBuf, bx, by, BULLET_WIDTH, BULLET_HEIGHT);
-    }
-  }
-
-  // PLAYER (на вершине)
-  if (playerShip.base.active) {
-    int sx = (int)playerShip.base.x - (SHIP_WIDTH / 2);
-    int sy = (int)playerShip.base.y - (SHIP_HEIGHT / 2);
-    //int sx = (int)playerShip.base.x - (SCREEN_WIDTH / 2); //test
-    //int sy = (int)playerShip.base.y - (SCREEN_HEIGHT / 2); test
-    if (rectsIntersect(rx, ry, rw, rh, sx, sy, SHIP_WIDTH, SHIP_HEIGHT)) {
-      int norm = (playerShip.rotation / 10) * 10;
-      if (playerShip.boosting) {
-        snprintf(nameBuf, sizeof(nameBuf), "/spr_ship_boost_%03d_%d.bin", norm, playerShip.boostFrame + 1);
-      } else {
-        snprintf(nameBuf, sizeof(nameBuf), "/spr_ship_stay_%03d.bin", norm);
-      }
-      drawSpriteFromPSRAM(nameBuf, sx, sy, SHIP_WIDTH, SHIP_HEIGHT);
-    }
-  }
-}
-
-void drawMenuBackground() {
-    drawSpriteFromPSRAM(START_BG_FILE, 0, 0, BG_WIDTH, BG_HEIGHT);
-}
-
-void drawGameBackground() {
-    drawSpriteFromPSRAM(MAIN_BG_FILE, 0, 0, BG_WIDTH, BG_HEIGHT);
-}
-
-void drawGameOverBackground() {
-    drawSpriteFromPSRAM(GAMEOVER_BG_FILE, 0, 0, BG_WIDTH, BG_HEIGHT);
-}
+}*/
 
 void drawShip(int16_t x, int16_t y, uint16_t angle, bool isBoosting = false, uint8_t boostFrame = 0) {
     char filename[32];
@@ -590,85 +605,60 @@ void drawAsteroid(int16_t x, int16_t y, uint8_t size, bool isComet, uint16_t dir
 void drawExplosions() {
     for (int i = 0; i < MAX_EXPLOSIONS; i++) {
         if (!explosions[i].active) continue;
+        const char* file;
+        int w, h;
+        if (explosions[i].isBig) {              // Большой взрыв
 
-        int x = (int)explosions[i].x - BOOMSMALL_WIDTH / 2;
-        int y = (int)explosions[i].y - BOOMSMALL_HEIGHT / 2;
-
-        restoreBgAreaFromBG(bgMain, BG_WIDTH, BG_HEIGHT, x, y, BOOMSMALL_WIDTH, BOOMSMALL_HEIGHT);
-
-        // Рисуем текущий кадр анимации
-        drawSpriteFromPSRAM(BOOM_SMALL_FILES[explosions[i].frame], x, y, BOOMSMALL_WIDTH, BOOMSMALL_HEIGHT);
+            file = BOOM_BIG_FILES[explosions[i].frame];
+            w = BOOMBIG_WIDTH;
+            h = BOOMBIG_HEIGHT;
+        } else {                                // Маленький взрыв
+            file = BOOM_SMALL_FILES[explosions[i].frame];
+            w = BOOMSMALL_WIDTH;
+            h = BOOMSMALL_HEIGHT;
+        }
+        int x = (int)explosions[i].x - w / 2;
+        int y = (int)explosions[i].y - h / 2;
+        drawSpriteFromPSRAM(file, x, y, w, h, bgCurrent, BG_WIDTH, BG_HEIGHT);
     }
 }
 
-// Вызывается каждый кадр **перед** движением объектов (или прямо после движения — но логика ниже предполагает
-// что вызываем функцию перед восстановлением старых участков и перед рисованием новых)
 void storeOldPositions() {
     // Сохраняем предыдущее положение корабля
     playerShip.base.oldX = (int)playerShip.base.x;
     playerShip.base.oldY = (int)playerShip.base.y;
-
     // Сохраняем пули
     for (int i = 0; i < MAX_BULLETS; ++i) {
         bullets[i].base.oldX = (int)bullets[i].base.x;
         bullets[i].base.oldY = (int)bullets[i].base.y;
     }
-
     // Сохраняем астероиды
     for (int i = 0; i < MAX_ASTEROIDS; ++i) {
         asteroids[i].base.oldX = (int)asteroids[i].base.x;
         asteroids[i].base.oldY = (int)asteroids[i].base.y;
     }
+    // Сохраняем взрывы
+    for (int i = 0; i < MAX_EXPLOSIONS; ++i) {
+        explosions[i].oldX = (int)explosions[i].x;
+        explosions[i].oldY = (int)explosions[i].y;
+    }
 }
 
 void drawScore(uint16_t score) {
+    const int scoreX = 5;
+    const int scoreY = 5;
+    const int scoreW = 80;  // ширина зоны под текст
+    const int scoreH = 16;  // высота
+    // Восстанавливаем фон под текстом счёта
+    restoreBgArea(scoreX, scoreY, scoreW, scoreH);
+    // Рисуем текст заново
     char scoreText[16];
     snprintf(scoreText, sizeof(scoreText), "SCORE: %d", score);
     tft.setTextColor(TFT_WHITE);
-    tft.drawString(scoreText, 5, 5, 2);
-}
-
-void updateGameGraphics() {
-    if (bgCurrent) {
-        // Быстро нарисуем фон
-        tft.pushImage(0, 0, BG_WIDTH, BG_HEIGHT, bgCurrent);
-    }
-    
-    if (playerShip.base.visible) {
-        drawSpriteFromPSRAM(playerShip.base.sprite, 
-                            (int)playerShip.base.x, 
-                            (int)playerShip.base.y,
-                            playerShip.base.width, 
-                            playerShip.base.height);
-    }
-
-    // 3. Очистить и перерисовать пули
-    for (int i = 0; i < MAX_BULLETS; i++) {
-        if (bullets[i].base.visible) {
-            drawSpriteFromPSRAM(bullets[i].base.sprite,
-                                (int)bullets[i].base.x,
-                                (int)bullets[i].base.y,
-                                bullets[i].base.width,
-                                bullets[i].base.height);
-        }
-    }
-
-    // 4. Очистить и перерисовать астероиды
-    for (int i = 0; i < MAX_ASTEROIDS; i++) {
-        if (asteroids[i].base.visible) {
-            drawSpriteFromPSRAM(asteroids[i].base.sprite,
-                                (int)asteroids[i].base.x,
-                                (int)asteroids[i].base.y,
-                                asteroids[i].base.width,
-                                asteroids[i].base.height);
-        }
-    }
+    tft.drawString(scoreText, scoreX, scoreY, 2);
 }
 
 // ==================== АУДИО СИСТЕМА ====================
-const char* introTracks[3] = {"/snd_intro1.wav", "/snd_intro2.wav", "/snd_intro3.wav"};
-const char* mainTracks[5] = {"/snd_main1.wav", "/snd_main2.wav", "/snd_main3.wav", "/snd_main4.wav", "/snd_main5.wav"};
-const char* gameOverTracks[3] = {"/snd_gameover1.wav", "/snd_gameover2.wav", "/snd_gameover3.wav"};
 
 bool parseWav(File &f, WavInfo &info) {
     if (!f) return false;
@@ -839,10 +829,11 @@ void resetGame() {
     playerShip.boosting = false;
     playerShip.base.active = true;
     playerShip.lastShot = 0;
-    firstFrameInPlay = true; // чтобы не применялось движение в первый кадр
+    firstFrameInPlay = true; // чтобы не применялось движение в первый кадр todo попробовать выпилить проблема была апаратная
 
     for (int i = 0; i < MAX_BULLETS; i++) bullets[i].base.active = false;
     for (int i = 0; i < MAX_ASTEROIDS; i++) asteroids[i].base.active = false;
+    for (int i = 0; i < MAX_EXPLOSIONS; i++) explosions[i].active = false;
 
     activeAsteroids = 0;
     score = 0;
@@ -888,8 +879,30 @@ void spawnExplosion(float x, float y) {
             explosions[i].active = true;
             explosions[i].x = x;
             explosions[i].y = y;
+            explosions[i].oldX = (int)x;
+            explosions[i].oldY = (int)y;
             explosions[i].frame = 0;
             explosions[i].lastFrameTime = millis();
+            explosions[i].isBig = false;  
+            explosions[i].isPlayer = false;
+            return;
+        }
+    }
+}
+
+void spawnBigExplosion(float x, float y, bool isPlayerExplosion = false) {
+    for (int i = 0; i < MAX_EXPLOSIONS; ++i) {
+        if (!explosions[i].active) {
+            explosions[i].active = true;
+            explosions[i].x = x;
+            explosions[i].y = y;
+            explosions[i].oldX = (int)x;
+            explosions[i].oldY = (int)y;
+            explosions[i].frame = 0;
+            explosions[i].lastFrameTime = millis();
+            explosions[i].isBig = true;
+            explosions[i].isPlayer = isPlayerExplosion;
+            if (isPlayerExplosion) playerExploding = true;
             return;
         }
     }
@@ -900,12 +913,33 @@ void updateExplosions() {
     for (int i = 0; i < MAX_EXPLOSIONS; i++) {
         if (!explosions[i].active) continue;
 
-        if (now - explosions[i].lastFrameTime > 80) { // задержка между кадрами
+        if (explosions[i].frame > 0) {
+            int w = explosions[i].isBig ? BOOMBIG_WIDTH : BOOMSMALL_WIDTH;
+            int h = explosions[i].isBig ? BOOMBIG_HEIGHT : BOOMSMALL_HEIGHT;
+            int x = (int)explosions[i].oldX - w / 2;
+            int y = (int)explosions[i].oldY - h / 2;
+            restoreBgArea(x, y, w, h);
+        }
+
+        explosions[i].oldX = explosions[i].x;
+        explosions[i].oldY = explosions[i].y;
+
+        if (now - explosions[i].lastFrameTime > ANIMATION_SPEED) { // задержка между кадрами
             explosions[i].frame++;
             explosions[i].lastFrameTime = now;
 
-            if (explosions[i].frame >= 5) {
-                explosions[i].active = false; // завершена анимация
+            uint8_t maxFrames = explosions[i].isBig ? 13 : 5;
+            if (explosions[i].frame >= maxFrames) {
+                explosions[i].active = false;
+                // Если это был взрыв игрока — завершаем игру
+                if (explosions[i].isPlayer) {
+                    playerExploding = false;
+                    if (score > highScore) {
+                        highScore = score;
+                        writeHighScore(highScore);
+                    }
+                    changeState(STATE_GAME_OVER);
+                }
             }
         }
     }
@@ -929,7 +963,8 @@ void checkCollisions() {
                 spawnExplosion(asteroids[a].base.x, asteroids[a].base.y); //взрыв
                 activeAsteroids--;
                 score++;
-                playSoundEffect(400, 150);
+                playSoundEffect(400, 300);
+                spawnExplosion(asteroids[a].base.x, asteroids[a].base.y);
                 spawnAsteroid();
                 break;
             }
@@ -945,79 +980,14 @@ void checkCollisions() {
         float distanceSq = dx * dx + dy * dy;
 
         if (distanceSq < 144.0f) {
-            playerShip.base.active = false;
-            playSoundEffect(200, 400);
-            changeState(STATE_GAME_OVER);
-            
-            if (score > highScore) {
-                highScore = score;
-                writeHighScore(highScore);
+            if (!playerExploding) {
+                playerShip.base.active = false;
+                playSoundEffect(50, 1000);
+                spawnBigExplosion(playerShip.base.x, playerShip.base.y, true); // isPlayerExplosion = true
             }
             break;
         }
     }
-}
-
-// ==================== КЭШ СПРАЙТОВ В PSRAM ====================
-
-std::vector<SpriteData> spriteCache;
-
-void loadFileToPSRAM(const char* filename) {
-    File f = SD_MMC.open(filename, FILE_READ);
-    if (!f) {
-        Serial.printf("[ERR] Не найден файл %s\n", filename);
-        return;
-    }
-    size_t sz = f.size();
-    uint8_t* buf = (uint8_t*)malloc(sz);;
-    if (!buf) {
-        Serial.printf("[ERR] Нет памяти для %s\n", filename);
-        f.close();
-        return;
-    }
-    f.read(buf, sz);
-    f.close();
-
-    SpriteData entry;
-    entry.name = String(filename);
-    entry.data = reinterpret_cast<uint16_t*>(buf);
-    entry.size = sz / 2; // количество пикселей
-    spriteCache.push_back(entry);
-    Serial.printf("[OK] Загружен %s (%u байт, %u пикселей)\n", filename, sz, entry.size);
-}
-
-// Загружаем все спрайты в PSRAM
-void loadAllSpritesToPSRAM() {
-    const char* files[] = {
-        START_BG_FILE, MAIN_BG_FILE, GAMEOVER_BG_FILE,
-        NAME1_FILE, NAME2_FILE, ASTEROID_FILE,
-        BOOM_BIG_FILE
-    };
-
-    for (auto file : files) loadFileToPSRAM(file);
-
-    // Загружаем массивы
-    for (int i = 0; i < 36; i++) {
-        loadFileToPSRAM(SHIP_STAY_FILES[i]);
-        loadFileToPSRAM(BULLET_FILES[i]);
-        loadFileToPSRAM(COMET_FILES[i]);
-        for (int f = 0; f < 3; f++)
-            loadFileToPSRAM(SHIP_BOOST_FILES[i][f]);
-    }
-    for (int i = 0; i < 5; i++) {
-        loadFileToPSRAM(BOOM_SMALL_FILES[i]);
-    }
-}
-
-// Поиск спрайта в кеше
-uint16_t* getSpriteFromCache(const char* name, size_t& outSize) {
-  for (auto &s : spriteCache) {
-    if (s.name.equals(name)) {
-      outSize = s.size;
-      return s.data;
-    }
-  }
-  return nullptr;
 }
 
 // ==================== ОСНОВНЫЕ ФУНКЦИИ ====================
@@ -1027,7 +997,6 @@ void setup() {
     
     tft.init();
     tft.setRotation(0);
-    tft.fillScreen(TFT_BLUE); //todo ошибка вывода цветов 
     
     pinMode(ENCODER_CLK, INPUT_PULLUP);
     pinMode(ENCODER_DT, INPUT_PULLUP);
@@ -1092,9 +1061,9 @@ void loop() {
                 const int pressX = 35, pressY = 120;
                 const int pressW = 60, pressH = 24;
                 // 1) Восстанавливаем фон под логотип
-                restoreBgAreaFromBG(bgStart, BG_WIDTH, BG_HEIGHT, nameX, nameY, nameW, nameH);
+                restoreBgArea(nameX, nameY, nameW, nameH);
                 // 2) Восстанавливаем фон под мигающим текстом
-                restoreBgAreaFromBG(bgStart, BG_WIDTH, BG_HEIGHT, pressX, pressY, pressW, pressH);
+                restoreBgArea(pressX, pressY, pressW, pressH);
                 // 3) Рисуем логотип
                 if ((millis() / 1000) % 2 == 0) {
                     drawSpriteFromPSRAM(NAME1_FILE, nameX, nameY, nameW, nameH, bgStart, BG_WIDTH, BG_HEIGHT);
@@ -1206,7 +1175,7 @@ void loop() {
             }
 
             // Обновление анимаций взрывов
-            updateExplosions();
+            updateExplosions(); //todo проверить нужна ли она вообще
 
             // Спавн астероидов
             if (activeAsteroids < 1 + (score / 5)) {
@@ -1220,6 +1189,7 @@ void loop() {
                 restoreShipBg();
                 restoreBulletsBg();
                 restoreAsteroidsBg();
+                restoreExplosionsBg();
             }
 
             drawShip(
@@ -1250,26 +1220,12 @@ void loop() {
         // Отрисовка активных взрывов
         drawExplosions();
 
-        for (int i = 0; i < MAX_EXPLOSIONS; i++) {
-            if (explosions[i].active) {
-                // Воспроизводим кадры с интервалом 10мс
-                if (millis() - explosions[i].lastFrameTime > 10) {
-                    explosions[i].frame++;
-                    explosions[i].lastFrameTime = millis();
-                    if (explosions[i].frame >= 5) {
-                        explosions[i].active = false;
-                        continue;
-                    }
-                }
-            }
-        }
-
         drawScore(score);
 
         // обновление анимации boost (оставляем твою логику)
         static uint32_t lastBoostAnimTime = 0;
         if (playerShip.boosting) {
-            if (millis() - lastBoostAnimTime > 80) {
+            if (millis() - lastBoostAnimTime > ANIMATION_SPEED) {
                 playerShip.boostFrame = (playerShip.boostFrame + 1) % 3;
                 lastBoostAnimTime = millis();
             }
@@ -1301,8 +1257,6 @@ void loop() {
         
     frameCount++;
 
-    // Каждые 5 секунд печатаем статистику
-    //unsigned long now = millis();
     if (now - lastStatsTime >= 5000) {
         lastStatsTime = now;
         printStats();
