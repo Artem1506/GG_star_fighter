@@ -5,7 +5,7 @@ ESP32-WROVER – E
 - Частота CPU  240 MHz
 - Встроенная RAM  320 KB SRAM
 - Внешняя PSRAM  4 MB
-- Flash память  8 MB SPI Flash
+- Flash (PROGMEM) память  8 MB SPI Flash
 
 SPI TFT Display ST7735 with 128 x 160
 
