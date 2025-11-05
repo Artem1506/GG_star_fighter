@@ -144,19 +144,15 @@ constexpr float COMET_SPEED_MULTIPLIER = 1.9f;
 constexpr unsigned long DEBOUNCE_MS = 50;
 
 // ==================== СТРУКТУРЫ И ПЕРЕЧИСЛЕНИЯ ====================
-struct Entity
-{
+struct Entity {
 	float x, y;          // Позиция центра
 	float vx, vy;        // Скорость
 	bool active;         // Существует ли объект
 	int oldX, oldY;      // Предыдущая позиция (для стирания)
-	bool visible;        // Нужно ли рисовать
 	int width, height;   // Размер спрайта
 	const char* sprite;  // Имя файла спрайта
 };
-
-struct Ship
-{
+struct Ship {
 	Entity base;
 	int16_t rotation;
 	bool boosting;
@@ -164,22 +160,16 @@ struct Ship
 	uint32_t lastBoostFrame;
 	uint8_t boostFrame;
 };
-
-struct Bullet
-{
+struct Bullet {
 	Entity base;
 	uint32_t spawnTime;
 };
-
-struct Asteroid
-{
+struct Asteroid {
 	Entity base;
 	uint8_t variant;
 	bool isComet;
 };
-
-struct Explosion
-{
+struct Explosion {
 	bool active;
 	float x, y;
 	int oldX, oldY;
@@ -188,33 +178,25 @@ struct Explosion
 	bool isPlayer;
 	bool isBig;
 };
-
-struct WavInfo
-{
+struct WavInfo {
 	uint32_t dataPos;
 	uint32_t dataLen;
 	uint16_t channels;
 	uint32_t sampleRate;
 	uint16_t bitsPerSample;
 };
-
-struct InputState
-{
+struct InputState {
 	int16_t encoderAngle;
 	bool encoderPressed;
 	bool buttonA;
 	bool buttonB;
 };
-
-struct SpriteData
-{
+struct SpriteData {
 	String name;
 	uint16_t* data;
 	size_t size;
 };
-
-enum GameState
-{
+enum GameState {
 	STATE_MENU,
 	STATE_PLAY,
 	STATE_GAME_OVER
@@ -225,7 +207,6 @@ TFT_eSPI tft;
 GameState currentState = STATE_MENU;
 uint32_t stateStartTime = 0;
 uint32_t lastFrameTime = 0;
-
 Ship playerShip;
 Bullet bullets[5];
 Asteroid asteroids[10];
@@ -234,12 +215,9 @@ bool playerExploding = false;  // true когда запущен взрыв ко
 int score = 0;
 int highScore = 0;
 uint8_t activeAsteroids = 0;
-
 volatile int32_t encoderPos = 0;
 volatile int lastEncoderARaw = 0;
-
 bool firstFrameInPlay = true;
-
 bool audioPlaying = false;
 TaskHandle_t audioTaskHandle = nullptr;
 File currentFile;
@@ -264,8 +242,7 @@ static inline void swap16Buffer(uint16_t* data, size_t count)
 		data[i] = (v >> 8) | (v << 8);
 	}
 }
-
-// ==================== Мониторинг ресурсов ====================
+// Мониторинг ресурсов
 unsigned long lastStatsTime = 0;
 unsigned long frameCount = 0;
 
@@ -295,30 +272,21 @@ void printStats()
 }
 
 // ==================== ФУНКЦИИ SD-КАРТЫ ====================
-bool initSDCard()
-{
+bool initSDCard() {
 	if (!SD_MMC.begin("/sdcard", true))
-	{
-		// Serial.println("SD Card Mount Failed");
-		return false;
-	}
+	{ return false; }
 	if (SD_MMC.cardType() == CARD_NONE)
-	{
-		// Serial.println("No SD card attached");
-		return false;
-	}
+	{ return false; }
 	return true;
 }
 
-int readHighScore()
-{
+int readHighScore() {
 	File file = SD_MMC.open(HIGHSCORE_FILE, FILE_READ);
 	if (!file) return 0;
 
 	char buffer[16];
 	uint8_t index = 0;
-	while (file.available() && index < sizeof(buffer) - 1)
-	{
+	while (file.available() && index < sizeof(buffer) - 1) {
 		char c = file.read();
 		if (c == '\n' || c == '\r') break;
 		buffer[index++] = c;
@@ -328,11 +296,9 @@ int readHighScore()
 	return atoi(buffer);
 }
 
-void writeHighScore(int score)
-{
+void writeHighScore(int score) {
 	File file = SD_MMC.open(HIGHSCORE_FILE, FILE_WRITE);
-	if (file)
-	{
+	if (file) {
 		file.seek(0);
 		file.println(score);
 		file.close();
@@ -342,19 +308,15 @@ void writeHighScore(int score)
 // ==================== КЭШ СПРАЙТОВ В PSRAM ====================
 std::vector<SpriteData> spriteCache;
 
-void loadFileToPSRAM(const char* filename)
-{
+void loadFileToPSRAM(const char* filename) {
 	File f = SD_MMC.open(filename, FILE_READ);
-	if (!f)
-	{
+	if (!f) {
 		Serial.printf("[ERR] Не найден файл %s\n", filename);
 		return;
 	}
 	size_t sz = f.size();
 	uint8_t* buf = (uint8_t*)malloc(sz);
-	;
-	if (!buf)
-	{
+	if (!buf) {
 		Serial.printf("[ERR] Нет памяти для %s\n", filename);
 		f.close();
 		return;
@@ -375,37 +337,30 @@ void loadFileToPSRAM(const char* filename)
 }
 
 // Загружаем все спрайты в PSRAM
-void loadAllSpritesToPSRAM()
-{
+void loadAllSpritesToPSRAM() {
 	const char* files[] = {START_BG_FILE, MAIN_BG_FILE, GAMEOVER_BG_FILE, GOTEXT_FILE, NAME1_FILE, NAME2_FILE, ASTEROID1_FILE, ASTEROID2_FILE, ASTEROID3_FILE};
 	for (auto file : files)
 		loadFileToPSRAM(file);
 	// Загружаем массивы
-	for (int i = 0; i < 36; i++)
-	{
+	for (int i = 0; i < 36; i++) {
 		loadFileToPSRAM(SHIP_STAY_FILES[i]);
 		loadFileToPSRAM(BULLET_FILES[i]);
 		loadFileToPSRAM(COMET_FILES[i]);
 		for (int f = 0; f < 3; f++)
 			loadFileToPSRAM(SHIP_BOOST_FILES[i][f]);
 	}
-	for (int i = 0; i < 5; i++)
-	{
+	for (int i = 0; i < 5; i++) {
 		loadFileToPSRAM(BOOM_SMALL_FILES[i]);
 	}
-	for (int i = 0; i < 13; ++i)
-	{
+	for (int i = 0; i < 13; ++i) {
 		loadFileToPSRAM(BOOM_BIG_FILES[i]);
 	}
 }
 
 // Поиск спрайта в кеше
-uint16_t* getSpriteFromCache(const char* name, size_t& outSize)
-{
-	for (auto& s : spriteCache)
-	{
-		if (s.name.equals(name))
-		{
+uint16_t* getSpriteFromCache(const char* name, size_t& outSize) {
+	for (auto& s : spriteCache) {
+		if (s.name.equals(name)) {
 			outSize = s.size;
 			return s.data;
 		}
@@ -414,20 +369,16 @@ uint16_t* getSpriteFromCache(const char* name, size_t& outSize)
 }
 
 // ==================== ФУНКЦИИ ОТРИСОВКИ ====================
-bool drawLogoStremed()
-{
+bool drawLogoStremed() {
 	File file = SD_MMC.open(LOGO_FILE, FILE_READ);
 	const int CHUNK_HEIGHT = 4;
 	uint16_t chunkBuffer[BG_WIDTH * CHUNK_HEIGHT];
-	for (int y = 0; y < BG_HEIGHT; y += CHUNK_HEIGHT)
-	{
+	for (int y = 0; y < BG_HEIGHT; y += CHUNK_HEIGHT) {
 		int currentChunkHeight = min(CHUNK_HEIGHT, BG_HEIGHT - y);
 		size_t chunkSize = BG_WIDTH * currentChunkHeight * 2;
-
 		// Читаем чанк из файла
 		size_t bytesRead = file.read((uint8_t*)chunkBuffer, chunkSize);
-		for (int i = 0; i < (bytesRead / 2); i++)
-		{
+		for (int i = 0; i < (bytesRead / 2); i++) {
 			uint16_t v = chunkBuffer[i];
 			chunkBuffer[i] = (v >> 8) | (v << 8);
 		}
@@ -437,84 +388,60 @@ bool drawLogoStremed()
 	return true;
 }
 
-static inline void drawSpriteFromPSRAM(const char* filename, int x, int y, int w, int h, uint16_t* bgPtr = nullptr, int bgW = BG_WIDTH, int bgH = BG_HEIGHT)
-{
+static inline void drawSpriteFromPSRAM(const char* filename, int x, int y, int w, int h, uint16_t* bgPtr = nullptr, int bgW = BG_WIDTH, int bgH = BG_HEIGHT) {
 	// Получаем спрайт из кеша (в PSRAM, RGB565)
 	size_t spriteSizePixels = 0;
 	uint16_t* sprite = (uint16_t*)getSpriteFromCache(filename, spriteSizePixels);
 	if (!sprite) return;
-
-	// Если bgPtr не передан — используем bgCurrent (глобальная переменная в твоем коде)
 	if (!bgPtr) bgPtr = bgCurrent;
-	if (!bgPtr)
-	{
-		// Без фона прозрачные пиксели нельзя корректно подставить — просто нарисуем без прозрачности
+	if (!bgPtr) {
+		// Без фона прозрачные пиксели нельзя подставить — рисуем без прозрачности
 		tft.pushImage(x, y, w, h, sprite);
 		return;
 	}
 
 	// Видимый прямоугольник с учётом экрана
 	int sx = x, sy = y, sw = w, sh = h;
-	// clip по экрану (0..SCREEN_WIDTH-1 / 0..SCREEN_HEIGHT-1)
-	if (sx + sw <= 0 || sy + sh <= 0 || sx >= SCREEN_WIDTH || sy >= SCREEN_HEIGHT) return;  // полностью вне
+	if (sx + sw <= 0 || sy + sh <= 0 || sx >= SCREEN_WIDTH || sy >= SCREEN_HEIGHT) return;
 	int srcXOffset = 0, srcYOffset = 0;
-	if (sx < 0)
-	{
+	if (sx < 0) {
 		srcXOffset = -sx;
 		sw += sx;
 		sx = 0;
-	}  // sx was negative
-	if (sy < 0)
-	{
+	}
+	if (sy < 0) {
 		srcYOffset = -sy;
 		sh += sy;
 		sy = 0;
-	}  // sy was negative
+	}
 	if (sx + sw > SCREEN_WIDTH) sw = SCREEN_WIDTH - sx;
 	if (sy + sh > SCREEN_HEIGHT) sh = SCREEN_HEIGHT - sy;
 	if (sw <= 0 || sh <= 0) return;
 
-	// Временный буфер для одной строки (макс ширина 128). static — один буфер для всех вызовов.
-	static uint16_t rowBuf[128];  // 128 * 2 = 256 bytes — очень мало
-	// Проверка размеров на случай, если w > 128 (в твоём проекте max 128, но на всякий)
-	if (w > 128)
-	{
+	/* test1 if (w > 128) {
 		// не ожидается, но на всякий случай — отрезаем (ниже мы работаем с sw)
-	}
+	}*/
 
 	// Для каждой видимой строки:
-	for (int row = 0; row < sh; ++row)
-	{
+	for (int row = 0; row < sh; ++row) {
 		int spriteRowIndex = (srcYOffset + row) * w + srcXOffset;  // индекс первого пикселя этой видимой строки в sprite
 		uint16_t* spriteRowPtr = sprite + spriteRowIndex;
-
 		// Сначала проверим, есть ли в этой видимой строке хоть один прозрачный пиксель.
 		bool hasTransparent = false;
-		for (int col = 0; col < sw; ++col)
-		{
-			if (spriteRowPtr[col] == (uint16_t)TFT_TRANSPARENT_COLOR)
-			{
+		for (int col = 0; col < sw; ++col) {
+			if (spriteRowPtr[col] == (uint16_t)TFT_TRANSPARENT_COLOR) {
 				hasTransparent = true;
 				break;
 			}
 		}
 
-		if (!hasTransparent)
-		{
-			// Строка полностью непрозрачна — отправляем напрямую (уменьшаем указатель, т.к. pushImage ожидает полный ряд)
-			// Но pushImage принимает указатель на начало строки нужной длины: spriteRowPtr указывает именно на первый видимый пиксель.
+		if (!hasTransparent) {
 			tft.pushImage(sx, sy + row, sw, 1, spriteRowPtr);
 		}
-		else
-		{
-			// Нужно собрать строку, заменив прозрачные пиксели на фон
-			// Вычисляем указатель на фоновые пиксели
-			// bgPtr хранит фон полной ширины bgW (обычно BG_WIDTH), берём пиксели с координат (sx .. sx+sw-1, sy+row)
+		else {
 			uint16_t* bgRowPtr = bgPtr + (sy + row) * bgW + sx;
-
 			// Собираем временный буфер
-			for (int col = 0; col < sw; ++col)
-			{
+			for (int col = 0; col < sw; ++col) {
 				uint16_t sp = spriteRowPtr[col];
 				if (sp == (uint16_t)TFT_TRANSPARENT_COLOR) { rowBuf[col] = bgRowPtr[col]; }
 				else { rowBuf[col] = sp; }
@@ -525,17 +452,14 @@ static inline void drawSpriteFromPSRAM(const char* filename, int x, int y, int w
 	}
 }
 
-void restoreBgArea(int x, int y, int w, int h)
-{
+void restoreBgArea(int x, int y, int w, int h) {
 	if (!bgCurrent) return;
 	// ограничение по экрану
-	if (x < 0)
-	{
+	if (x < 0) {
 		w += x;
 		x = 0;
 	}
-	if (y < 0)
-	{
+	if (y < 0) {
 		h += y;
 		y = 0;
 	}
@@ -544,47 +468,35 @@ void restoreBgArea(int x, int y, int w, int h)
 	if (w <= 0 || h <= 0) return;
 
 	// Восстановление кусочка фона
-	for (int row = 0; row < h; row++)
-	{
+	for (int row = 0; row < h; row++) {
 		memcpy(rowBuf, bgCurrent + (y + row) * BG_WIDTH + x, w * 2);
 		tft.pushImage(x, y + row, w, 1, rowBuf);
 	}
 }
 // Восстановить фон под одной сущностью (Entity). width/height передаются в пикселях.
-void restoreEntityBg(const Entity& e, int spriteW, int spriteH)
-{
-
+void restoreEntityBg(const Entity& e, int spriteW, int spriteH) {
 	int x = e.oldX - spriteW / 2;
 	int y = e.oldY - spriteH / 2;
 	restoreBgArea(x, y, spriteW, spriteH);
 }
-void restoreShipBg()
-{
+void restoreShipBg() {
 	restoreEntityBg(playerShip.base, SHIP_WIDTH, SHIP_HEIGHT);
 }
-void restoreBulletsBg()
-{
-	for (int i = 0; i < MAX_BULLETS; ++i)
-	{
+void restoreBulletsBg() {
+	for (int i = 0; i < MAX_BULLETS; ++i) {
 		if (bullets[i].base.active || bullets[i].base.oldX >= 0) { restoreEntityBg(bullets[i].base, BULLET_WIDTH, BULLET_HEIGHT); }
 	}
 }
-void restoreAsteroidsBg()
-{
-	for (int i = 0; i < MAX_ASTEROIDS; ++i)
-	{
-		if (asteroids[i].base.active || asteroids[i].base.oldX >= 0)
-		{
+void restoreAsteroidsBg() {
+	for (int i = 0; i < MAX_ASTEROIDS; ++i) {
+		if (asteroids[i].base.active || asteroids[i].base.oldX >= 0) {
 			int w = 0, h = 0;
-			if (asteroids[i].isComet)
-			{
+			if (asteroids[i].isComet) {
 				w = COMET_WIDTH;
 				h = COMET_HEIGHT;
 			}
-			else
-			{
-				switch (asteroids[i].variant)
-				{
+			else {
+				switch (asteroids[i].variant) {
 					case 1:
 						w = ASTEROID1_WIDTH;
 						h = ASTEROID1_HEIGHT;
@@ -604,12 +516,9 @@ void restoreAsteroidsBg()
 		}
 	}
 }
-void restoreExplosionsBg()
-{
-	for (int i = 0; i < MAX_EXPLOSIONS; ++i)
-	{
-		if (explosions[i].active)
-		{
+void restoreExplosionsBg() {
+	for (int i = 0; i < MAX_EXPLOSIONS; ++i) {
+		if (explosions[i].active) {
 			int w = explosions[i].isBig ? BOOMBIG_WIDTH : BOOMSMALL_WIDTH;
 			int h = explosions[i].isBig ? BOOMBIG_HEIGHT : BOOMSMALL_HEIGHT;
 			explosions[i].oldX = explosions[i].x;
@@ -621,21 +530,18 @@ void restoreExplosionsBg()
 	}
 }
 
-void drawShip(int16_t x, int16_t y, uint16_t angle, bool isBoosting = false, uint8_t boostFrame = 0)
-{
+void drawShip(int16_t x, int16_t y, uint16_t angle, bool isBoosting = false, uint8_t boostFrame = 0) {
 	char filename[32];
 	uint16_t normalizedAngle = (angle / 10) * 10;
 
 	if (isBoosting) { snprintf(filename, sizeof(filename), "/spr_ship_boost_%03d_%d.bin", normalizedAngle, boostFrame + 1); }
-	else
-	{
+	else {
 		snprintf(filename, sizeof(filename), "/spr_ship_stay_%03d.bin", normalizedAngle);
 	}
 	drawSpriteFromPSRAM(filename, x - SHIP_WIDTH / 2, y - SHIP_HEIGHT / 2, SHIP_WIDTH, SHIP_HEIGHT);
 }
 
-void drawBullet(int16_t x, int16_t y, uint16_t angle)
-{
+void drawBullet(int16_t x, int16_t y, uint16_t angle) {
 	char filename[24];
 	uint16_t normalizedAngle = (angle / 10) * 10;
 	snprintf(filename, sizeof(filename), "/spr_bullet_%03d.bin", normalizedAngle);
@@ -643,21 +549,17 @@ void drawBullet(int16_t x, int16_t y, uint16_t angle)
 	drawSpriteFromPSRAM(filename, x - BULLET_WIDTH / 2, y - BULLET_HEIGHT / 2, BULLET_WIDTH, BULLET_HEIGHT);
 }
 
-void drawAsteroid(int16_t x, int16_t y, uint8_t variant, bool isComet, uint16_t direction)
-{
+void drawAsteroid(int16_t x, int16_t y, uint8_t variant, bool isComet, uint16_t direction) {
 	char filename[32];
-	if (isComet)
-	{
+	if (isComet) {
 		uint16_t normalizedDirection = (direction / 10) * 10;
 		snprintf(filename, sizeof(filename), "/spr_comet_%03d.bin", normalizedDirection);
 		drawSpriteFromPSRAM(filename, x - COMET_WIDTH / 2, y - COMET_HEIGHT / 2, COMET_WIDTH, COMET_HEIGHT);
 	}
-	else
-	{
+	else {
 		const char* spriteFile = nullptr;
 		uint8_t w = 0, h = 0;
-		switch (variant)
-		{
+		switch (variant) {
 			case 1:
 				spriteFile = ASTEROID1_FILE;
 				w = ASTEROID1_WIDTH;
@@ -679,22 +581,17 @@ void drawAsteroid(int16_t x, int16_t y, uint8_t variant, bool isComet, uint16_t 
 	}
 }
 
-void drawExplosions()
-{
-	for (int i = 0; i < MAX_EXPLOSIONS; i++)
-	{
+void drawExplosions() {
+	for (int i = 0; i < MAX_EXPLOSIONS; i++) {
 		if (!explosions[i].active) continue;
 		const char* file;
 		int w, h;
-		if (explosions[i].isBig)
-		{  // Большой взрыв
-
+		if (explosions[i].isBig) {  // Большой взрыв
 			file = BOOM_BIG_FILES[explosions[i].frame];
 			w = BOOMBIG_WIDTH;
 			h = BOOMBIG_HEIGHT;
 		}
-		else
-		{  // Маленький взрыв
+		else {  // Маленький взрыв
 			file = BOOM_SMALL_FILES[explosions[i].frame];
 			w = BOOMSMALL_WIDTH;
 			h = BOOMSMALL_HEIGHT;
@@ -705,33 +602,28 @@ void drawExplosions()
 	}
 }
 
-void storeOldPositions()
-{
+void storeOldPositions() {
 	// Сохраняем предыдущее положение корабля
 	playerShip.base.oldX = (int)playerShip.base.x;
 	playerShip.base.oldY = (int)playerShip.base.y;
 	// Сохраняем пули
-	for (int i = 0; i < MAX_BULLETS; ++i)
-	{
+	for (int i = 0; i < MAX_BULLETS; ++i) {
 		bullets[i].base.oldX = (int)bullets[i].base.x;
 		bullets[i].base.oldY = (int)bullets[i].base.y;
 	}
 	// Сохраняем астероиды
-	for (int i = 0; i < MAX_ASTEROIDS; ++i)
-	{
+	for (int i = 0; i < MAX_ASTEROIDS; ++i) {
 		asteroids[i].base.oldX = (int)asteroids[i].base.x;
 		asteroids[i].base.oldY = (int)asteroids[i].base.y;
 	}
 	// Сохраняем взрывы
-	for (int i = 0; i < MAX_EXPLOSIONS; ++i)
-	{
+	for (int i = 0; i < MAX_EXPLOSIONS; ++i) {
 		explosions[i].oldX = (int)explosions[i].x;
 		explosions[i].oldY = (int)explosions[i].y;
 	}
 }
 
-void drawScore(uint16_t score)
-{
+void drawScore(uint16_t score) {
 	const int scoreX = 2;
 	const int scoreY = 2;
 	const int scoreW = 60;  // ширина зоны под текст
@@ -746,8 +638,7 @@ void drawScore(uint16_t score)
 }
 
 // ==================== АУДИО СИСТЕМА ====================
-bool parseWav(File& f, WavInfo& info)
-{
+bool parseWav(File& f, WavInfo& info) {
 	if (!f) return false;
 	f.seek(0);
 	char riff[4];
@@ -758,15 +649,13 @@ bool parseWav(File& f, WavInfo& info)
 	f.read((uint8_t*)wave, 4);
 	if (strncmp(wave, "WAVE", 4) != 0) return false;
 
-	while (f.position() + 8 <= f.size())
-	{
+	while (f.position() + 8 <= f.size()) {
 		char id[5] = {0};
 		f.read((uint8_t*)id, 4);
 		uint32_t chunkSize;
 		f.read((uint8_t*)&chunkSize, 4);
 
-		if (strncmp(id, "fmt ", 4) == 0)
-		{
+		if (strncmp(id, "fmt ", 4) == 0) {
 			uint16_t audioFormat;
 			f.read((uint8_t*)&audioFormat, 2);
 			f.read((uint8_t*)&info.channels, 2);
@@ -777,8 +666,7 @@ bool parseWav(File& f, WavInfo& info)
 			f.read((uint8_t*)&blockAlign, 2);
 			f.read((uint8_t*)&info.bitsPerSample, 2);
 		}
-		else if (strncmp(id, "data", 4) == 0)
-		{
+		else if (strncmp(id, "data", 4) == 0) {
 			info.dataPos = f.position();
 			info.dataLen = chunkSize;
 			return true;
@@ -788,8 +676,7 @@ bool parseWav(File& f, WavInfo& info)
 	return false;
 }
 
-void initI2S()
-{
+void initI2S() {
 	const i2s_config_t i2s_config = {
     .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),  // мастер, передача данных
 		.sample_rate = AUDIO_SAMPLE_RATE,
@@ -825,8 +712,7 @@ void initI2S()
 	i2s_start(I2S_NUM_0);
 }
 
-void stopCurrentTrack()
-{
+void stopCurrentTrack() {
 	if (audioPlaying) {
 		audioPlaying = false;
     for (int i=0; i<50; ++i) {
@@ -835,23 +721,18 @@ void stopCurrentTrack()
         }
 			audioTaskHandle = NULL;	
 		i2s_zero_dma_buffer(I2S_NUM_0);
-		//i2s_stop(I2S_NUM_0);
 		Serial.println("[AUDIO] Track stopped.");
 	}
 }
-void playRandomTrack(const char** tracks, uint8_t count)
-{
-    if (count == 0 || tracks == nullptr) return;
 
+void playRandomTrack(const char** tracks, uint8_t count) {
+    if (count == 0 || tracks == nullptr) return;
     stopCurrentTrack();          // останавливаем предыдущее воспроизведение
     delay(50);                   // короткая пауза для стабильности I2S
-
     uint8_t idx = random(count); // выбираем случайный трек
     const char* fn = tracks[idx];
     if (!fn) return;
-
     Serial.printf("[AUDIO] Selected track: %s\n", fn);
-
     // Создаём задачу для параллельного воспроизведения
     xTaskCreatePinnedToCore(
     [](void* param) {
@@ -864,7 +745,6 @@ void playRandomTrack(const char** tracks, uint8_t count)
             vTaskDelete(NULL);
             return;
         }
-
         WavInfo info = { 0 };
         if (!parseWav(*f, info)) {
             Serial.printf("[AUDIO] Bad WAV: %s\n", fn);
@@ -877,9 +757,7 @@ void playRandomTrack(const char** tracks, uint8_t count)
         i2s_bits_per_sample_t bits =
             (info.bitsPerSample == 32) ? I2S_BITS_PER_SAMPLE_32BIT : I2S_BITS_PER_SAMPLE_16BIT;
         i2s_channel_t ch = (info.channels == 1) ? I2S_CHANNEL_MONO : I2S_CHANNEL_STEREO;
-
         i2s_set_clk(I2S_NUM_0, info.sampleRate, bits, ch);
-        i2s_start(I2S_NUM_0);
 
         Serial.printf("[AUDIO] playing %s: %u Hz, %u bits, %u ch, dataPos=%u, len=%u\n",
             fn, info.sampleRate, info.bitsPerSample, info.channels,
@@ -890,7 +768,6 @@ void playRandomTrack(const char** tracks, uint8_t count)
         uint8_t buf[BUF_SZ];
         uint32_t left = info.dataLen;
         size_t written = 0;
-
         audioPlaying = true;
 
         while (audioPlaying && left > 0) {
@@ -918,33 +795,27 @@ void playRandomTrack(const char** tracks, uint8_t count)
     );
 }
 
-void playSoundEffect(uint16_t frequency, uint32_t duration)
-{
+void playSoundEffect(uint16_t frequency, uint32_t duration) {
 	tone(BUZZER_PIN, frequency, duration);
 }
 
 // ==================== ВВОД ДАННЫХ ====================
-void IRAM_ATTR handleEncoderISR()
-{
+void IRAM_ATTR handleEncoderISR() {
 	int clkState = digitalRead(ENCODER_CLK);
 	int dtState = digitalRead(ENCODER_DT);
 
-	if (clkState != lastEncoderARaw)
-	{
+	if (clkState != lastEncoderARaw) {
 		if (clkState == dtState) { encoderPos++; }
 		else { encoderPos--; }
 	}
 	lastEncoderARaw = clkState;
 }
 
-InputState getInputState()
-{
+InputState getInputState() {
 	InputState state;
-
 	// Угол из энкодера
 	state.encoderAngle = (encoderPos * 10) % 360;
 	if (state.encoderAngle < 0) state.encoderAngle += 360;
-
 	// Чтение кнопок
 	int swState = digitalRead(ENCODER_SW);
 	int clkState = digitalRead(ENCODER_CLK);
@@ -971,8 +842,7 @@ InputState getInputState()
 }
 
 // ==================== ИГРОВАЯ ЛОГИКА ====================
-void changeState(GameState newState)
-{
+void changeState(GameState newState) {
 	currentState = newState;
 	stateStartTime = millis();
 	firstFrameInPlay = true;
@@ -980,8 +850,7 @@ void changeState(GameState newState)
 	stopCurrentTrack();
 	digitalWrite(LED_PIN, LOW);
 
-	switch (newState)
-	{
+	switch (newState) {
 		case STATE_MENU:
 			bgCurrent = bgStart;
 			playRandomTrack(introTracks, 3);
@@ -997,8 +866,7 @@ void changeState(GameState newState)
 	}
 }
 
-void resetGame()
-{
+void resetGame() {
 	playerShip.base.x = SCREEN_WIDTH / 2;
 	playerShip.base.y = SCREEN_HEIGHT / 2;
 	playerShip.base.vx = 0;
@@ -1021,15 +889,11 @@ void resetGame()
 	delay(50);  // маленькая пауза стабилизирует питание дисплея
 }
 
-void spawnAsteroid(bool forceComet = false)
-{
-	for (int i = 0; i < MAX_ASTEROIDS; i++)
-	{
-		if (!asteroids[i].base.active)
-		{
+void spawnAsteroid(bool forceComet = false) {
+	for (int i = 0; i < MAX_ASTEROIDS; i++) {
+		if (!asteroids[i].base.active) {
 			uint8_t side = random(4);
-			switch (side)
-			{
+			switch (side) {
 				case 0:
 					asteroids[i].base.x = -20;
 					asteroids[i].base.y = random(SCREEN_HEIGHT);
@@ -1059,28 +923,24 @@ void spawnAsteroid(bool forceComet = false)
 
 			uint8_t variant = random(1, 4);
 			asteroids[i].variant = variant;
-			if (variant == 1)
-			{
+			if (variant == 1) {
 				asteroids[i].base.width = ASTEROID1_WIDTH;
 				asteroids[i].base.height = ASTEROID1_HEIGHT;
 				asteroids[i].base.sprite = ASTEROID1_FILE;
 			}
-			else if (variant == 2)
-			{
+			else if (variant == 2) {
 				asteroids[i].base.width = ASTEROID2_WIDTH;
 				asteroids[i].base.height = ASTEROID2_HEIGHT;
 				asteroids[i].base.sprite = ASTEROID2_FILE;
 			}
-			else
-			{
+			else {
 				asteroids[i].base.width = ASTEROID3_WIDTH;
 				asteroids[i].base.height = ASTEROID3_HEIGHT;
 				asteroids[i].base.sprite = ASTEROID3_FILE;
 			}
 
 			asteroids[i].isComet = forceComet || (random(100) < (score * 2));
-			if (asteroids[i].isComet)
-			{
+			if (asteroids[i].isComet) {
 				asteroids[i].base.vx *= COMET_SPEED_MULTIPLIER;
 				asteroids[i].base.vy *= COMET_SPEED_MULTIPLIER;
 			}
@@ -1092,12 +952,9 @@ void spawnAsteroid(bool forceComet = false)
 	}
 }
 
-void spawnExplosion(float x, float y)
-{
-	for (int i = 0; i < MAX_EXPLOSIONS; i++)
-	{
-		if (!explosions[i].active)
-		{
+void spawnExplosion(float x, float y) {
+	for (int i = 0; i < MAX_EXPLOSIONS; i++) {
+		if (!explosions[i].active) {
 			explosions[i].active = true;
 			explosions[i].x = x;
 			explosions[i].y = y;
@@ -1113,11 +970,9 @@ void spawnExplosion(float x, float y)
 }
 
 void spawnBigExplosion(float x, float y, bool isPlayerExplosion = false) {
-	digitalWrite(LED_PIN, HIGH); //test
-	for (int i = 0; i < MAX_EXPLOSIONS; ++i)
-	{
-		if (!explosions[i].active)
-		{
+	digitalWrite(LED_PIN, HIGH);
+	for (int i = 0; i < MAX_EXPLOSIONS; ++i) {
+		if (!explosions[i].active) {
 			explosions[i].active = true;
 			explosions[i].x = x;
 			explosions[i].y = y;
@@ -1133,15 +988,11 @@ void spawnBigExplosion(float x, float y, bool isPlayerExplosion = false) {
 	}
 }
 
-void updateExplosions()
-{
+void updateExplosions() {
 	uint32_t now = millis();
-	for (int i = 0; i < MAX_EXPLOSIONS; i++)
-	{
+	for (int i = 0; i < MAX_EXPLOSIONS; i++) {
 		if (!explosions[i].active) continue;
-
-		if (explosions[i].frame > 0)
-		{
+		if (explosions[i].frame > 0) {
 			int w = explosions[i].isBig ? BOOMBIG_WIDTH : BOOMSMALL_WIDTH;
 			int h = explosions[i].isBig ? BOOMBIG_HEIGHT : BOOMSMALL_HEIGHT;
 			int x = (int)explosions[i].oldX - w / 2;
@@ -1152,21 +1003,17 @@ void updateExplosions()
 		explosions[i].oldX = explosions[i].x;
 		explosions[i].oldY = explosions[i].y;
 
-		if (now - explosions[i].lastFrameTime > ANIMATION_SPEED)
-		{  // задержка между кадрами
+		if (now - explosions[i].lastFrameTime > ANIMATION_SPEED) {  // задержка между кадрами
 			explosions[i].frame++;
 			explosions[i].lastFrameTime = now;
 
 			uint8_t maxFrames = explosions[i].isBig ? 13 : 5;
-			if (explosions[i].frame >= maxFrames)
-			{
+			if (explosions[i].frame >= maxFrames) {
 				explosions[i].active = false;
 				// Если это был взрыв игрока — завершаем игру
-				if (explosions[i].isPlayer)
-				{
+				if (explosions[i].isPlayer) {
 					playerExploding = false;
-					if (score > highScore)
-					{
+					if (score > highScore) {
 						highScore = score;
 						writeHighScore(highScore);
 					}
@@ -1177,15 +1024,12 @@ void updateExplosions()
 	}
 }
 
-void checkCollisions()
-{
+void checkCollisions() {
 	// Пули -> Астероиды
-	for (int b = 0; b < MAX_BULLETS; b++)
-	{
+	for (int b = 0; b < MAX_BULLETS; b++) {
 		if (!bullets[b].base.active) continue;
 
-		for (int a = 0; a < MAX_ASTEROIDS; a++)
-		{
+		for (int a = 0; a < MAX_ASTEROIDS; a++) {
 			if (!asteroids[a].base.active) continue;
 
 			float dx = bullets[b].base.x - asteroids[a].base.x;
@@ -1196,10 +1040,8 @@ void checkCollisions()
 
 			float asteroidRadius = 0.0f;
 			if (asteroids[a].isComet) { asteroidRadius = max(COMET_WIDTH, COMET_HEIGHT) / 2.0f; }
-			else
-			{
-				switch (asteroids[a].variant)
-				{
+			else {
+				switch (asteroids[a].variant) {
 					case 1:
 						asteroidRadius = max(ASTEROID1_WIDTH, ASTEROID1_HEIGHT) / 2.0f;
 						break;
@@ -1215,8 +1057,7 @@ void checkCollisions()
 
 			float collideDist = bulletRadius + asteroidRadius;
 
-			if (distanceSq < collideDist * collideDist)
-			{
+			if (distanceSq < collideDist * collideDist) {
 				// --- Столкновение: уничтожаем пулю и астероид
 				bullets[b].base.active = false;
 				asteroids[a].base.active = false;
@@ -1232,8 +1073,7 @@ void checkCollisions()
 
 	// Корабль -> Астероиды
 	float shipRadius = max(SHIP_WIDTH, SHIP_HEIGHT) / 2.0f;
-	for (int a = 0; a < MAX_ASTEROIDS; a++)
-	{
+	for (int a = 0; a < MAX_ASTEROIDS; a++) {
 		if (!asteroids[a].base.active) continue;
 
 		float dx = playerShip.base.x - asteroids[a].base.x;
@@ -1242,10 +1082,8 @@ void checkCollisions()
 
 		float asteroidRadius = 0.0f;
 		if (asteroids[a].isComet) { asteroidRadius = max(COMET_WIDTH, COMET_HEIGHT) / 2.0f; }
-		else
-		{
-			switch (asteroids[a].variant)
-			{
+		else {
+			switch (asteroids[a].variant) {
 				case 1:
 					asteroidRadius = max(ASTEROID1_WIDTH, ASTEROID1_HEIGHT) / 2.0f;
 					break;
@@ -1259,8 +1097,7 @@ void checkCollisions()
 			}
 		}
 		float collideDist = shipRadius + asteroidRadius;
-		if (distanceSq < collideDist * collideDist)
-		{
+		if (distanceSq < collideDist * collideDist) {
 			// --- Столкновение корабля с астероидом/кометой ---
 			playerShip.base.active = false;
 			asteroids[a].base.active = false;
@@ -1274,8 +1111,7 @@ void checkCollisions()
 }
 
 // ==================== ОСНОВНЫЕ ФУНКЦИИ ====================
-void setup()
-{
+void setup() {
 	Serial.begin(115200);
 	delay(1000);
 
@@ -1297,8 +1133,7 @@ void setup()
 	lastEncoderARaw = digitalRead((gpio_num_t)ENCODER_CLK);
 	attachInterrupt(digitalPinToInterrupt(ENCODER_CLK), handleEncoderISR, CHANGE);
 
-	if (!initSDCard())
-	{
+	if (!initSDCard()) {
 		tft.drawString("SD Card Error", 20, 70, 2);
 		while (1);
 	}
@@ -1319,8 +1154,7 @@ void setup()
 	changeState(STATE_MENU);
 }
 
-void loop()
-{
+void loop() {
 	uint32_t now = millis();
 	if (now - lastFrameTime < 33) return;  // 30 FPS
 	lastFrameTime = now;
@@ -1329,111 +1163,83 @@ void loop()
 
 	uint32_t currentTime = millis();
 
-	switch (currentState)
-	{
+	switch (currentState) {
 		case STATE_MENU: {
-			if (firstFrameInPlay)
-			{
+			if (firstFrameInPlay) {
 				tft.pushImage(0, 0, BG_WIDTH, BG_HEIGHT, bgCurrent);  // отрисовка фона
 				firstFrameInPlay = false;
 			}
-			bgCurrent = bgStart;
-
-			// playRandomTrack(introTracks, 3);
 
 			storeOldPositions();
-
 			// Координаты и размеры логотипа
 			const int nameX = 3, nameY = 109;
 			const int nameW = NAME_WIDTH, nameH = NAME_HEIGHT;
-
-			// Координаты и размеры мигающего текста
+			// Координаты и размеры текста
 			const int pressX = 28, pressY = 71;
 			const int pressW = 80, pressH = 24;
-			// 1) Восстанавливаем фон под логотип
 			restoreBgArea(nameX, nameY, nameW, nameH);
-			// 2) Восстанавливаем фон под мигающим текстом
 			restoreBgArea(pressX, pressY, pressW, pressH);
-			// 3) Рисуем логотип
+
 			if ((millis() / 1000) % 2 == 0) { drawSpriteFromPSRAM(NAME1_FILE, nameX, nameY, nameW, nameH, bgStart, BG_WIDTH, BG_HEIGHT); }
 			else { drawSpriteFromPSRAM(NAME2_FILE, nameX, nameY, nameW, nameH, bgStart, BG_WIDTH, BG_HEIGHT); }
 
-			// 4) Рисуем мигающий текст
-			if ((millis() / 700) % 2 == 0)
-			{
-				tft.setTextColor(TFT_WHITE);  // прозрачный фон
+			if ((millis() / 700) % 2 == 0) {
+				tft.setTextColor(TFT_WHITE);
 				tft.setTextSize(1);
 				tft.setCursor(pressX + 19, pressY);
 				tft.print("press");
 				tft.setCursor(pressX, pressY + 10);
 				tft.print("right button");
-				//digitalWrite(LED_PIN, HIGH);
 			}
-			//else { digitalWrite(LED_PIN, LOW); }
-			if (input.encoderPressed)
-			{
+			if (input.encoderPressed) {
 				delay(500);
 				resetGame();
 				changeState(STATE_PLAY);
-				// playRandomTrack(mainTracks, 5);
 			}
 			break;
 		}
 		case STATE_PLAY:
-			if (firstFrameInPlay)
-			{
+			if (firstFrameInPlay) {
 				tft.pushImage(0, 0, BG_WIDTH, BG_HEIGHT, bgCurrent);  // отрисовка фона
 				firstFrameInPlay = false;
 			}
 
-			bgCurrent = bgMain;
 			// === 1. Сохранить старые позиции перед движением ===
 			storeOldPositions();
 
 			playerShip.rotation = input.encoderAngle;
 
-			if (!firstFrameInPlay)
-			{
-				if (input.buttonA)
-				{
+			if (!firstFrameInPlay) {
+				if (input.buttonA) {
 					float rad = playerShip.rotation * PI / 180.0f;
 					playerShip.base.vx += cos(rad) * SHIP_SPEED;
 					playerShip.base.vy += sin(rad) * SHIP_SPEED;
-
 					// Ограничиваем скорость по модулю
 					float speed = sqrt(playerShip.base.vx * playerShip.base.vx + playerShip.base.vy * playerShip.base.vy);
-					if (speed > SHIP_SPEED)
-					{
+					if (speed > SHIP_SPEED) {
 						playerShip.base.vx = (playerShip.base.vx / speed) * SHIP_SPEED;
 						playerShip.base.vy = (playerShip.base.vy / speed) * SHIP_SPEED;
 					}
-
 					playerShip.boosting = true;
 				}
 				else { playerShip.boosting = false; }
 			}
-
 			// Движение корабля
 			playerShip.base.x += playerShip.base.vx;
 			playerShip.base.y += playerShip.base.vy;
-
 			// Телепортация
 			if (playerShip.base.x < 0) playerShip.base.x = SCREEN_WIDTH;
 			if (playerShip.base.x > SCREEN_WIDTH) playerShip.base.x = 0;
 			if (playerShip.base.y < 0) playerShip.base.y = SCREEN_HEIGHT;
 			if (playerShip.base.y > SCREEN_HEIGHT) playerShip.base.y = 0;
-
 			// --- 3. Применяем трение
 			playerShip.base.vx *= 0.95f;  // плавное затухание скорости по X
 			playerShip.base.vy *= 0.95f;  // плавное затухание скорости по Y
 
 			// Стрельба
-			if (input.buttonB && currentTime - playerShip.lastShot > BULLET_DELAY)
-			{
-				for (int i = 0; i < MAX_BULLETS; i++)
-				{
-					if (!bullets[i].base.active)
-					{
+			if (input.buttonB && currentTime - playerShip.lastShot > BULLET_DELAY) {
+				for (int i = 0; i < MAX_BULLETS; i++) {
+					if (!bullets[i].base.active) {
 						float rad = playerShip.rotation * PI / 180.0f;
 						bullets[i].base.x = playerShip.base.x;
 						bullets[i].base.y = playerShip.base.y;
@@ -1451,21 +1257,16 @@ void loop()
 					}
 				}
 			}
-
 			// Обновление пуль и астероидов
-			for (int i = 0; i < MAX_BULLETS; i++)
-			{
-				if (bullets[i].base.active)
-				{
+			for (int i = 0; i < MAX_BULLETS; i++) {
+				if (bullets[i].base.active) {
 					bullets[i].base.x += bullets[i].base.vx;
 					bullets[i].base.y += bullets[i].base.vy;
 					if (currentTime - bullets[i].spawnTime > 2000) bullets[i].base.active = false;
 				}
 			}
-			for (int i = 0; i < MAX_ASTEROIDS; i++)
-			{
-				if (asteroids[i].base.active)
-				{
+			for (int i = 0; i < MAX_ASTEROIDS; i++) {
+				if (asteroids[i].base.active) {
 					asteroids[i].base.x += asteroids[i].base.vx;
 					asteroids[i].base.y += asteroids[i].base.vy;
 
@@ -1475,18 +1276,15 @@ void loop()
 					if (asteroids[i].base.y > SCREEN_HEIGHT + 20) asteroids[i].base.y = -20;
 				}
 			}
-
 			// Обновление анимаций взрывов
 			updateExplosions();  // todo проверить нужна ли она вообще
-
 			// Спавн астероидов
 			if (activeAsteroids < 1 + (score / 5)) { spawnAsteroid(); }
 
 			checkCollisions();
 
 			// 3) ВОССТАНОВЛЯЕМ фон там, где раньше были объекты
-			if (!firstFrameInPlay)
-			{
+			if (!firstFrameInPlay) {
 				restoreShipBg();
 				restoreBulletsBg();
 				restoreAsteroidsBg();
@@ -1495,32 +1293,25 @@ void loop()
 
 			drawShip((int)playerShip.base.x, (int)playerShip.base.y, playerShip.rotation, playerShip.boosting, playerShip.boostFrame);
 
-			for (int i = 0; i < MAX_BULLETS; i++)
-			{
-				if (bullets[i].base.active)
-				{
+			for (int i = 0; i < MAX_BULLETS; i++) {
+				if (bullets[i].base.active) {
 					float angle = atan2(bullets[i].base.vy, bullets[i].base.vx) * 180.0f / PI;
 					if (angle < 0) angle += 360;
 					drawBullet((int)bullets[i].base.x, (int)bullets[i].base.y, (uint16_t)angle);
 				}
 			}
 
-			for (int i = 0; i < MAX_ASTEROIDS; ++i)
-			{
-				if (asteroids[i].base.active)
-				{
+			for (int i = 0; i < MAX_ASTEROIDS; ++i) {
+				if (asteroids[i].base.active) {
 					float direction = atan2(asteroids[i].base.vy, asteroids[i].base.vx) * 180.0f / PI;
 					if (direction < 0) direction += 360;
 					int w, h;
-					if (asteroids[i].isComet)
-					{
+					if (asteroids[i].isComet) {
 						w = COMET_WIDTH;
 						h = COMET_HEIGHT;
 					}
-					else
-					{
-						switch (asteroids[i].variant)
-						{
+					else {
+						switch (asteroids[i].variant) {
 							case 1:
 								w = ASTEROID1_WIDTH;
 								h = ASTEROID1_HEIGHT;
@@ -1547,22 +1338,17 @@ void loop()
 
 			// обновление анимации boost
 			static uint32_t lastBoostAnimTime = 0;
-			if (playerShip.boosting)
-			{
-				if (millis() - lastBoostAnimTime > ANIMATION_SPEED)
-				{
+			if (playerShip.boosting) {
+				if (millis() - lastBoostAnimTime > ANIMATION_SPEED) {
 					playerShip.boostFrame = (playerShip.boostFrame + 1) % 3;
 					lastBoostAnimTime = millis();
 				}
 			}
 			break;
 
-		case STATE_GAME_OVER:
+			case STATE_GAME_OVER:
 
-			bgCurrent = bgGameOver;
-
-			if (firstFrameInPlay)
-			{
+			if (firstFrameInPlay) {
 				tft.pushImage(0, 0, BG_WIDTH, BG_HEIGHT, bgCurrent);  // отрисовка фона
 				firstFrameInPlay = false;
 			}
@@ -1572,12 +1358,9 @@ void loop()
 			// Координаты и размеры мигающего текста
 			const int pressX = 28, pressY = 100;
 			const int pressW = 80, pressH = 24;
-
 			restoreBgArea(pressX, pressY, pressW, pressH);
-
 			// Рисуем мигающий текст
-			if ((millis() / 700) % 2 == 0)
-			{
+			if ((millis() / 700) % 2 == 0) {
 				tft.setTextColor(TFT_WHITE);  // прозрачный фон
 				tft.setTextSize(1);
 				tft.setCursor(pressX + 19, pressY);
@@ -1597,24 +1380,19 @@ void loop()
 			tft.setTextColor(TFT_GREEN);
 			tft.drawString(scoreText, 2, 13, 1);
 
-			if (input.encoderPressed)
-			{
+			if (input.encoderPressed) {
 				delay(500);
 				changeState(STATE_MENU);
-				// playRandomTrack(introTracks, 3);
 			}
 			break;
 	}
 
 	frameCount++;
 
-	if (now - lastStatsTime >= 5000)
-	{
+	if (now - lastStatsTime >= 5000) {
 		lastStatsTime = now;
-		//printStats();
+		//printStats(); //вывод статистики 
 	}
-	// даём планировщику "глоток" CPU — помогает предотвратить WDT
+	// зедержка для ядер CPU — помогает предотвратить WDT
 vTaskDelay(pdMS_TO_TICKS(1));
-
 }
-// TODO 1) логику моргания диодом придумать сделать.
