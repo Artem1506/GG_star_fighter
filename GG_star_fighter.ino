@@ -333,7 +333,7 @@ void loadFileToPSRAM(const char* filename) {
 	entry.data = reinterpret_cast<uint16_t*>(buf);
 	entry.size = sz / 2;  // количество пикселей
 	spriteCache.push_back(entry);
-	Serial.printf("[OK] Загружен %s (%u байт, %u пикселей)\n", filename, sz, entry.size);
+	//Serial.printf("[OK] Загружен %s (%u байт, %u пикселей)\n", filename, sz, entry.size);
 }
 
 // Загружаем все спрайты в PSRAM
@@ -698,7 +698,7 @@ void initI2S() {
 		.data_in_num = I2S_PIN_NO_CHANGE  // Не используем вход
 	};
 
-	if (i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL) == ESP_OK)
+	/* test if (i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL) == ESP_OK)
   	Serial.println("[I2S] driver installed");
 	else
     Serial.println("[ERR] i2s_driver_install failed");
@@ -709,7 +709,7 @@ void initI2S() {
     Serial.println("[ERR] i2s_set_pin failed");
 
 	i2s_zero_dma_buffer(I2S_NUM_0);
-	i2s_start(I2S_NUM_0);
+	i2s_start(I2S_NUM_0); */
 }
 
 void stopCurrentTrack() {
@@ -783,7 +783,6 @@ void playRandomTrack(const char** tracks, uint8_t count) {
         delete f;
         i2s_zero_dma_buffer(I2S_NUM_0);
         audioPlaying = false;
-        Serial.println("[AUDIO] done.");
         vTaskDelete(NULL);
         },
         "AudioTask",
@@ -826,15 +825,15 @@ InputState getInputState() {
 	state.buttonB = (digitalRead(BUTTON_B) == LOW);
 
 	static bool lastSW = false;
-	if (state.encoderPressed && !lastSW) { Serial.println(">>> ЭНКОДЕР НАЖАТ!"); }
-	if (!state.encoderPressed && lastSW) { Serial.println(">>> ЭНКОДЕР ОТПУЩЕН!"); }
+	//if (state.encoderPressed && !lastSW) { Serial.println(">>> ЭНКОДЕР НАЖАТ!"); }
+	//if (!state.encoderPressed && lastSW) { Serial.println(">>> ЭНКОДЕР ОТПУЩЕН!"); }
 	lastSW = state.encoderPressed;
 
 	static bool lastA = false, lastB = false;
-	if (state.buttonA && !lastA) Serial.println(">>> КНОПКА A НАЖАТА!");
-	if (!state.buttonA && lastA) Serial.println(">>> КНОПКА A ОТПУЩЕНА!");
-	if (state.buttonB && !lastB) Serial.println(">>> КНОПКА B НАЖАТА!");
-	if (!state.buttonB && lastB) Serial.println(">>> КНОПКА B ОТПУЩЕНА!");
+	//if (state.buttonA && !lastA) Serial.println(">>> КНОПКА A НАЖАТА!");
+	//if (!state.buttonA && lastA) Serial.println(">>> КНОПКА A ОТПУЩЕНА!");
+	//if (state.buttonB && !lastB) Serial.println(">>> КНОПКА B НАЖАТА!");
+	//if (!state.buttonB && lastB) Serial.println(">>> КНОПКА B ОТПУЩЕНА!");
 	lastA = state.buttonA;
 	lastB = state.buttonB;
 
@@ -875,7 +874,7 @@ void resetGame() {
 	playerShip.boosting = false;
 	playerShip.base.active = true;
 	playerShip.lastShot = 0;
-	firstFrameInPlay = true;  // чтобы не применялось движение в первый кадр todo попробовать выпилить проблема была апаратная
+	firstFrameInPlay = true;
 
 	for (int i = 0; i < MAX_BULLETS; i++)
 		bullets[i].base.active = false;
@@ -1126,9 +1125,9 @@ void setup() {
 	pinMode(LED_PIN, OUTPUT);
 	pinMode(BUZZER_PIN, OUTPUT);
 
-	Serial.printf("ENCODER_SW pin mode: %d\n", digitalRead(ENCODER_SW));
+	/* test Serial.printf("ENCODER_SW pin mode: %d\n", digitalRead(ENCODER_SW));
 	Serial.printf("ENCODER_CLK pin mode: %d\n", digitalRead(ENCODER_CLK));
-	Serial.printf("ENCODER_DT pin mode: %d\n", digitalRead(ENCODER_DT));
+	Serial.printf("ENCODER_DT pin mode: %d\n", digitalRead(ENCODER_DT)); */
 
 	lastEncoderARaw = digitalRead((gpio_num_t)ENCODER_CLK);
 	attachInterrupt(digitalPinToInterrupt(ENCODER_CLK), handleEncoderISR, CHANGE);
@@ -1140,7 +1139,7 @@ void setup() {
 
 	drawLogoStremed();
 
-	Serial.println("[INFO] Загружаем спрайты в PSRAM...");
+	//Serial.println("[INFO] Загружаем спрайты в PSRAM...");
 	loadAllSpritesToPSRAM();
 	Serial.println("[INFO] Спрайты готовы!");
 
