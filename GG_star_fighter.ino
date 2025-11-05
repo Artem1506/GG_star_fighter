@@ -30,15 +30,19 @@ constexpr int16_t SCREEN_HEIGHT = 160;
 
 // ==================== КОНСТАНТЫ ПУТЕЙ ФАЙЛОВ ====================
 constexpr const char* HIGHSCORE_FILE = "/highscore.txt";
-const char* introTracks[3] = {"/snd_intro1.wav", "/snd_intro2.wav", "/snd_intro3.wav"};
-const char* mainTracks[5] = {"/snd_main1.wav", "/snd_main2.wav", "/snd_main3.wav", "/snd_main4.wav", "/snd_main5.wav"};
-const char* gameOverTracks[3] = {"/snd_gameover1.wav", "/snd_gameover2.wav", "/snd_gameover3.wav"};
+const char* introTracks[3] = {
+	"/snd_intro1.wav", "/snd_intro2.wav", "/snd_intro3.wav"};
+const char* mainTracks[5] = {
+	"/snd_main1.wav", "/snd_main2.wav", "/snd_main3.wav", "/snd_main4.wav", "/snd_main5.wav"};
+const char* gameOverTracks[3] = {
+	"/snd_gameover1.wav", "/snd_gameover2.wav", "/snd_gameover3.wav"};
 constexpr const char* LOGO_FILE = "/spr_GG_logo.bin";
 constexpr const char* START_BG_FILE = "/spr_start_BG.bin";
 constexpr const char* NAME1_FILE = "/spr_main_name.bin";
 constexpr const char* NAME2_FILE = "/spr_main_name2.bin";
 constexpr const char* MAIN_BG_FILE = "/spr_main_BG.bin";
-constexpr const char* SHIP_BOOST_FILES[36][3] = {{"/spr_ship_boost_000_1.bin", "/spr_ship_boost_000_2.bin", "/spr_ship_boost_000_3.bin"},
+constexpr const char* SHIP_BOOST_FILES[36][3] = {
+	{"/spr_ship_boost_000_1.bin", "/spr_ship_boost_000_2.bin", "/spr_ship_boost_000_3.bin"},
 	{"/spr_ship_boost_010_1.bin", "/spr_ship_boost_010_2.bin", "/spr_ship_boost_010_3.bin"},
 	{"/spr_ship_boost_020_1.bin", "/spr_ship_boost_020_2.bin", "/spr_ship_boost_020_3.bin"},
 	{"/spr_ship_boost_030_1.bin", "/spr_ship_boost_030_2.bin", "/spr_ship_boost_030_3.bin"},
@@ -136,7 +140,7 @@ constexpr uint32_t BULLET_DELAY = 300;
 constexpr float SHIP_SPEED = 2.0f;
 constexpr float BULLET_SPEED = 4.0f;
 constexpr float ASTEROID_BASE_SPEED = 1.0f;
-constexpr float COMET_SPEED_MULTIPLIER = 1.5f;
+constexpr float COMET_SPEED_MULTIPLIER = 1.9f;
 constexpr unsigned long DEBOUNCE_MS = 50;
 
 // ==================== СТРУКТУРЫ И ПЕРЕЧИСЛЕНИЯ ====================
@@ -626,10 +630,8 @@ void drawShip(int16_t x, int16_t y, uint16_t angle, bool isBoosting = false, uin
 	else
 	{
 		snprintf(filename, sizeof(filename), "/spr_ship_stay_%03d.bin", normalizedAngle);
-		// test snprintf(filename, sizeof(filename), "/spr_comet_%03d.bin", normalizedAngle);
 	}
 	drawSpriteFromPSRAM(filename, x - SHIP_WIDTH / 2, y - SHIP_HEIGHT / 2, SHIP_WIDTH, SHIP_HEIGHT);
-	// test drawSpriteFromPSRAM(filename, x - COMET_WIDTH/2, y - COMET_HEIGHT/2, COMET_WIDTH, COMET_HEIGHT);
 }
 
 void drawBullet(int16_t x, int16_t y, uint16_t angle)
@@ -976,6 +978,7 @@ void changeState(GameState newState)
 	firstFrameInPlay = true;
 
 	stopCurrentTrack();
+	digitalWrite(LED_PIN, LOW);
 
 	switch (newState)
 	{
@@ -1075,7 +1078,7 @@ void spawnAsteroid(bool forceComet = false)
 				asteroids[i].base.sprite = ASTEROID3_FILE;
 			}
 
-			asteroids[i].isComet = forceComet || (random(100) < (score * 5));
+			asteroids[i].isComet = forceComet || (random(100) < (score * 2));
 			if (asteroids[i].isComet)
 			{
 				asteroids[i].base.vx *= COMET_SPEED_MULTIPLIER;
@@ -1109,8 +1112,8 @@ void spawnExplosion(float x, float y)
 	}
 }
 
-void spawnBigExplosion(float x, float y, bool isPlayerExplosion = false)
-{
+void spawnBigExplosion(float x, float y, bool isPlayerExplosion = false) {
+	digitalWrite(LED_PIN, HIGH); //test
 	for (int i = 0; i < MAX_EXPLOSIONS; ++i)
 	{
 		if (!explosions[i].active)
@@ -1364,9 +1367,9 @@ void loop()
 				tft.print("press");
 				tft.setCursor(pressX, pressY + 10);
 				tft.print("right button");
-				digitalWrite(LED_PIN, HIGH);
+				//digitalWrite(LED_PIN, HIGH);
 			}
-			else { digitalWrite(LED_PIN, LOW); }
+			//else { digitalWrite(LED_PIN, LOW); }
 			if (input.encoderPressed)
 			{
 				delay(500);
@@ -1441,6 +1444,9 @@ void loop()
 
 						playerShip.lastShot = currentTime;
 						playSoundEffect(2000, 100);
+						digitalWrite(LED_PIN, HIGH);
+						delay(10);
+						digitalWrite(LED_PIN, LOW);
 						break;
 					}
 				}
