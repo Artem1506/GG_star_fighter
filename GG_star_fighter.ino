@@ -6,6 +6,15 @@
 #include <cmath>
 #include <vector>
 
+//#define DEBUG //лог отключен
+#ifdef DEBUG
+  #define DEBUG_PRINTLN(...)  Serial.println(__VA_ARGS__)
+  #define DEBUG_PRINTF(...)   Serial.printf(__VA_ARGS__)
+#else
+  #define DEBUG_PRINTLN(...)
+  #define DEBUG_PRINTF(...)
+#endif
+
 // ==================== КОНСТАНТЫ ПИНОВ ====================
 constexpr uint8_t ENCODER_CLK = 32;
 constexpr uint8_t ENCODER_DT = 33;
@@ -220,7 +229,6 @@ volatile int lastEncoderARaw = 0;
 bool firstFrameInPlay = true;
 bool audioPlaying = false;
 TaskHandle_t audioTaskHandle = nullptr;
-File currentFile;
 
 // ===== GLOBAL BACKGROUND DATA =====
 static uint16_t rowBuf[128];     // буфер текущего фона в PSRAM
@@ -263,12 +271,11 @@ void printStats()
 	float fps = (frameCount - lastFrameCount) * 1000.0 / (now - lastFpsTime);
 	lastFrameCount = frameCount;
 	lastFpsTime = now;
-	Serial.println("=== System Stats ===");
-	Serial.printf("CPU: %u MHz\n", cpuFreq);
-	Serial.printf("Heap Free: %u bytes (Min: %u)\n", freeHeap, minFreeHeap);
-	Serial.printf("PSRAM: %u / %u bytes free\n", freePsram, psramSize);
-	Serial.printf("FPS: %.2f\n", fps);
-	Serial.println("====================");
+	DEBUG_PRINTLN("=== System Stats ===");
+	DEBUG_PRINTF("CPU: %u MHz\n", cpuFreq);
+	DEBUG_PRINTF("Heap Free: %u bytes (Min: %u)\n", freeHeap, minFreeHeap);
+	DEBUG_PRINTF("PSRAM: %u / %u bytes free\n", freePsram, psramSize);
+	DEBUG_PRINTF("FPS: %.2f\n", fps);
 }
 
 // ==================== ФУНКЦИИ SD-КАРТЫ ====================
@@ -311,13 +318,13 @@ std::vector<SpriteData> spriteCache;
 void loadFileToPSRAM(const char* filename) {
 	File f = SD_MMC.open(filename, FILE_READ);
 	if (!f) {
-		Serial.printf("[ERR] Не найден файл %s\n", filename);
+		DEBUG_PRINTF("[ERR] Не найден файл %s\n", filename);
 		return;
 	}
 	size_t sz = f.size();
 	uint8_t* buf = (uint8_t*)malloc(sz);
 	if (!buf) {
-		Serial.printf("[ERR] Нет памяти для %s\n", filename);
+		DEBUG_PRINTF("[ERR] Нет памяти для %s\n", filename);
 		f.close();
 		return;
 	}
@@ -333,7 +340,7 @@ void loadFileToPSRAM(const char* filename) {
 	entry.data = reinterpret_cast<uint16_t*>(buf);
 	entry.size = sz / 2;  // количество пикселей
 	spriteCache.push_back(entry);
-	//Serial.printf("[OK] Загружен %s (%u байт, %u пикселей)\n", filename, sz, entry.size);
+	DEBUG_PRINTLN("[OK] Загружен %s (%u байт, %u пикселей)\n", filename, sz, entry.size);
 }
 
 // Загружаем все спрайты в PSRAM
@@ -417,10 +424,6 @@ static inline void drawSpriteFromPSRAM(const char* filename, int x, int y, int w
 	if (sx + sw > SCREEN_WIDTH) sw = SCREEN_WIDTH - sx;
 	if (sy + sh > SCREEN_HEIGHT) sh = SCREEN_HEIGHT - sy;
 	if (sw <= 0 || sh <= 0) return;
-
-	/* test1 if (w > 128) {
-		// не ожидается, но на всякий случай — отрезаем (ниже мы работаем с sw)
-	}*/
 
 	// Для каждой видимой строки:
 	for (int row = 0; row < sh; ++row) {
@@ -660,10 +663,6 @@ bool parseWav(File& f, WavInfo& info) {
 			f.read((uint8_t*)&audioFormat, 2);
 			f.read((uint8_t*)&info.channels, 2);
 			f.read((uint8_t*)&info.sampleRate, 4);
-			uint32_t byteRate;
-			f.read((uint8_t*)&byteRate, 4);
-			uint16_t blockAlign;
-			f.read((uint8_t*)&blockAlign, 2);
 			f.read((uint8_t*)&info.bitsPerSample, 2);
 		}
 		else if (strncmp(id, "data", 4) == 0) {
@@ -689,7 +688,6 @@ void initI2S() {
 		.use_apll = false,           // можно true для более стабильного звука
 		.tx_desc_auto_clear = true,  // автоматически очищать TX
 		.fixed_mclk = 0};
-
 	// Настройки пинов
 	const i2s_pin_config_t pin_config = {
 		.bck_io_num = I2S_BCK_PIN,        // BCK — Bit Clock
@@ -697,19 +695,18 @@ void initI2S() {
 		.data_out_num = I2S_DOUT_PIN,     // DATA — Data Out
 		.data_in_num = I2S_PIN_NO_CHANGE  // Не используем вход
 	};
-
-	/* test if (i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL) == ESP_OK)
-  	Serial.println("[I2S] driver installed");
+	i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
+	if (i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL) == ESP_OK)
+  	DEBUG_PRINTLN("[I2S] driver installed");
 	else
-    Serial.println("[ERR] i2s_driver_install failed");
-
+    DEBUG_PRINTLN("[ERR] i2s_driver_install failed");
+	i2s_set_pin(I2S_NUM_0, &pin_config);
 	if (i2s_set_pin(I2S_NUM_0, &pin_config) == ESP_OK)
-    Serial.println("[I2S] pins set");
+    DEBUG_PRINTLN("[I2S] pins set");
 	else
-    Serial.println("[ERR] i2s_set_pin failed");
-
+    DEBUG_PRINTLN("[ERR] i2s_set_pin failed");
 	i2s_zero_dma_buffer(I2S_NUM_0);
-	i2s_start(I2S_NUM_0); */
+	i2s_start(I2S_NUM_0);
 }
 
 void stopCurrentTrack() {
@@ -721,7 +718,7 @@ void stopCurrentTrack() {
         }
 			audioTaskHandle = NULL;	
 		i2s_zero_dma_buffer(I2S_NUM_0);
-		Serial.println("[AUDIO] Track stopped.");
+		DEBUG_PRINTLN("[AUDIO] Track stopped.");
 	}
 }
 
@@ -732,7 +729,7 @@ void playRandomTrack(const char** tracks, uint8_t count) {
     uint8_t idx = random(count); // выбираем случайный трек
     const char* fn = tracks[idx];
     if (!fn) return;
-    Serial.printf("[AUDIO] Selected track: %s\n", fn);
+    DEBUG_PRINTF("[AUDIO] Selected track: %s\n", fn);
     // Создаём задачу для параллельного воспроизведения
     xTaskCreatePinnedToCore(
     [](void* param) {
@@ -740,14 +737,14 @@ void playRandomTrack(const char** tracks, uint8_t count) {
 
         File* f = new File(SD_MMC.open(fn, FILE_READ));
         if (!*f) {
-            Serial.printf("[AUDIO] Failed to open file: %s\n", fn);
+            DEBUG_PRINTF("[AUDIO] Failed to open file: %s\n", fn);
             delete f;
             vTaskDelete(NULL);
             return;
         }
         WavInfo info = { 0 };
         if (!parseWav(*f, info)) {
-            Serial.printf("[AUDIO] Bad WAV: %s\n", fn);
+            DEBUG_PRINTF("[AUDIO] Bad WAV: %s\n", fn);
             f->close();
             delete f;
             vTaskDelete(NULL);
@@ -759,7 +756,7 @@ void playRandomTrack(const char** tracks, uint8_t count) {
         i2s_channel_t ch = (info.channels == 1) ? I2S_CHANNEL_MONO : I2S_CHANNEL_STEREO;
         i2s_set_clk(I2S_NUM_0, info.sampleRate, bits, ch);
 
-        Serial.printf("[AUDIO] playing %s: %u Hz, %u bits, %u ch, dataPos=%u, len=%u\n",
+        DEBUG_PRINTF("[AUDIO] playing %s: %u Hz, %u bits, %u ch, dataPos=%u, len=%u\n",
             fn, info.sampleRate, info.bitsPerSample, info.channels,
             (unsigned)info.dataPos, (unsigned)info.dataLen);
 
@@ -825,15 +822,15 @@ InputState getInputState() {
 	state.buttonB = (digitalRead(BUTTON_B) == LOW);
 
 	static bool lastSW = false;
-	//if (state.encoderPressed && !lastSW) { Serial.println(">>> ЭНКОДЕР НАЖАТ!"); }
-	//if (!state.encoderPressed && lastSW) { Serial.println(">>> ЭНКОДЕР ОТПУЩЕН!"); }
+	if (state.encoderPressed && !lastSW) { DEBUG_PRINTLN(">>> ЭНКОДЕР НАЖАТ!"); }
+	if (!state.encoderPressed && lastSW) { DEBUG_PRINTLN(">>> ЭНКОДЕР ОТПУЩЕН!"); }
 	lastSW = state.encoderPressed;
 
 	static bool lastA = false, lastB = false;
-	//if (state.buttonA && !lastA) Serial.println(">>> КНОПКА A НАЖАТА!");
-	//if (!state.buttonA && lastA) Serial.println(">>> КНОПКА A ОТПУЩЕНА!");
-	//if (state.buttonB && !lastB) Serial.println(">>> КНОПКА B НАЖАТА!");
-	//if (!state.buttonB && lastB) Serial.println(">>> КНОПКА B ОТПУЩЕНА!");
+	if (state.buttonA && !lastA) DEBUG_PRINTLN(">>> КНОПКА A НАЖАТА!");
+	if (!state.buttonA && lastA) DEBUG_PRINTLN(">>> КНОПКА A ОТПУЩЕНА!");
+	if (state.buttonB && !lastB) DEBUG_PRINTLN(">>> КНОПКА B НАЖАТА!");
+	if (!state.buttonB && lastB) DEBUG_PRINTLN(">>> КНОПКА B ОТПУЩЕНА!");
 	lastA = state.buttonA;
 	lastB = state.buttonB;
 
@@ -885,7 +882,7 @@ void resetGame() {
 
 	activeAsteroids = 0;
 	score = 0;
-	delay(50);  // маленькая пауза стабилизирует питание дисплея
+	delay(10);  // маленькая пауза стабилизирует питание дисплея
 }
 
 void spawnAsteroid(bool forceComet = false) {
@@ -1125,10 +1122,6 @@ void setup() {
 	pinMode(LED_PIN, OUTPUT);
 	pinMode(BUZZER_PIN, OUTPUT);
 
-	/* test Serial.printf("ENCODER_SW pin mode: %d\n", digitalRead(ENCODER_SW));
-	Serial.printf("ENCODER_CLK pin mode: %d\n", digitalRead(ENCODER_CLK));
-	Serial.printf("ENCODER_DT pin mode: %d\n", digitalRead(ENCODER_DT)); */
-
 	lastEncoderARaw = digitalRead((gpio_num_t)ENCODER_CLK);
 	attachInterrupt(digitalPinToInterrupt(ENCODER_CLK), handleEncoderISR, CHANGE);
 
@@ -1139,9 +1132,9 @@ void setup() {
 
 	drawLogoStremed();
 
-	//Serial.println("[INFO] Загружаем спрайты в PSRAM...");
+	DEBUG_PRINTLN("[INFO] Загружаем спрайты в PSRAM...");
 	loadAllSpritesToPSRAM();
-	Serial.println("[INFO] Спрайты готовы!");
+	DEBUG_PRINTLN("[INFO] Спрайты готовы!");
 
 	bgStart = (uint16_t*)getSpriteFromCache(START_BG_FILE, bgSizeStart);
 	bgMain = (uint16_t*)getSpriteFromCache(MAIN_BG_FILE, bgSizeMain);
@@ -1276,7 +1269,7 @@ void loop() {
 				}
 			}
 			// Обновление анимаций взрывов
-			updateExplosions();  // todo проверить нужна ли она вообще
+			updateExplosions();
 			// Спавн астероидов
 			if (activeAsteroids < 1 + (score / 5)) { spawnAsteroid(); }
 
@@ -1332,7 +1325,6 @@ void loop() {
 
 			// Отрисовка активных взрывов
 			drawExplosions();
-
 			drawScore(score);
 
 			// обновление анимации boost
@@ -1387,10 +1379,9 @@ void loop() {
 	}
 
 	frameCount++;
-
-	if (now - lastStatsTime >= 5000) {
+	if (now - lastStatsTime >= 3000) {
 		lastStatsTime = now;
-		//printStats(); //вывод статистики 
+		printStats(); //вывод статистики 
 	}
 	// зедержка для ядер CPU — помогает предотвратить WDT
 vTaskDelay(pdMS_TO_TICKS(1));
