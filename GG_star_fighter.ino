@@ -340,7 +340,7 @@ void loadFileToPSRAM(const char* filename) {
 	entry.data = reinterpret_cast<uint16_t*>(buf);
 	entry.size = sz / 2;  // количество пикселей
 	spriteCache.push_back(entry);
-	DEBUG_PRINTLN("[OK] Загружен %s (%u байт, %u пикселей)\n", filename, sz, entry.size);
+	DEBUG_PRINTF("[OK] Загружен %s (%u байт, %u пикселей)\n", filename, sz, entry.size);
 }
 
 // Загружаем все спрайты в PSRAM
@@ -663,6 +663,10 @@ bool parseWav(File& f, WavInfo& info) {
 			f.read((uint8_t*)&audioFormat, 2);
 			f.read((uint8_t*)&info.channels, 2);
 			f.read((uint8_t*)&info.sampleRate, 4);
+			uint32_t byteRate;
+			f.read((uint8_t*)&byteRate, 4);
+			uint16_t blockAlign;
+			f.read((uint8_t*)&blockAlign, 2);
 			f.read((uint8_t*)&info.bitsPerSample, 2);
 		}
 		else if (strncmp(id, "data", 4) == 0) {
@@ -695,20 +699,14 @@ void initI2S() {
 		.data_out_num = I2S_DOUT_PIN,     // DATA — Data Out
 		.data_in_num = I2S_PIN_NO_CHANGE  // Не используем вход
 	};
-	i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
-	if (i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL) == ESP_OK)
-  	DEBUG_PRINTLN("[I2S] driver installed");
-	else
-    DEBUG_PRINTLN("[ERR] i2s_driver_install failed");
-	i2s_set_pin(I2S_NUM_0, &pin_config);
-	if (i2s_set_pin(I2S_NUM_0, &pin_config) == ESP_OK)
-    DEBUG_PRINTLN("[I2S] pins set");
-	else
-    DEBUG_PRINTLN("[ERR] i2s_set_pin failed");
-	i2s_zero_dma_buffer(I2S_NUM_0);
-	i2s_start(I2S_NUM_0);
+//	if (i2s_driver_uninstall(I2S_NUM_0)) {
+    i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
+    i2s_set_pin(I2S_NUM_0, &pin_config);
+    i2s_zero_dma_buffer(I2S_NUM_0);
+//	} else {
+    DEBUG_PRINTLN("[I2S] already initialized");
+//	}
 }
-
 void stopCurrentTrack() {
 	if (audioPlaying) {
 		audioPlaying = false;
